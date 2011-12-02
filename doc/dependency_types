@@ -1,0 +1,95 @@
+=======================
+= Torque dependencies =
+=======================
+Torque has the following dependency types supported between jobs (from the qsub manpage):
+
+synccount:count
+  This job is the first in a set of jobs to be executed at the same time. Count is the number of additional jobs in the set.
+
+syncwith:jobid
+  This job is an additional member of a set of jobs to be executed at the same time. In the above and following dependency types, jobid is the job identifier of the first job in the set.
+
+after:jobid[:jobid...]
+  This job may be scheduled for execution at any point after jobs jobid have started execution.
+
+afterok:jobid[:jobid...]
+  This job may be scheduled for execution only after jobs jobid have terminated with no errors. See the csh warning under "Extended Description".
+
+afternotok:jobid[:jobid...]
+  This job may be scheduled for execution only after jobs jobid have terminated with errors. See the csh warning under "Extended Description".
+
+afterany:jobid[:jobid...]
+  This job may be scheduled for execution after jobs jobid have terminated, with or without errors.
+
+on:count
+  This job may be scheduled for execution after count dependencies on other jobs have been satisfied. This form is used in conjunction with one of the before forms, see below.
+
+before:jobid[:jobid...]
+  When this job has begun execution, then jobs jobid... may begin.
+
+beforeok:jobid[:jobid...]
+  If this job terminates execution without errors, then jobs jobid... may begin. See the csh warning under "Extended Description".
+
+beforenotok:jobid[:jobid...]
+  If this job terminates execution with errors, then jobs jobid... may begin. See the csh warning under "Extended Description".
+
+beforeany:jobid[:jobid...]
+  When this job terminates execution, jobs jobid... may begin.
+
+If any of the before forms are used, the jobs referenced by jobid must have been submitted with a dependency type of on.
+If any of the before forms are used, the jobs referenced by jobid must have the same owner as the job being submitted. Otherwise, the dependency is ignored.
+
+====================
+= PBS Make Support =
+====================
+
+pbsmake does not support the following subset (yet):
+  synccount/syncwith 
+
+pbsmake works on the idea of dependent jobs mixed with the idea of dependent files. Jobs are specified in relation to what they are supposed to create on the filesystem and job dependencies are specified by what they depend on in the filesystem. As such, there are two kinds of dependencies to worry about below: filled/unfilled. A filled dependency is one that doesn't need to be satisfied by running a job.
+
+pbsmake supports the other dependency types in the following way:
+  after:dependency
+  afterok:dependency
+  afternotok:dependency
+  afterany:dependency
+    - filled
+      no job dependency
+    - unfilled
+      depend on job as expected
+
+  on:count
+    ignored, this is only used internally for now
+
+  before:dependency
+  beforeok:dependency
+  beforenotok:dependency
+  beforeany:depedency
+    these are backwards dependencies, converted to the after versions internally
+    - filled
+      no dependency
+    - unfilled
+      run the dependency "after" this job
+        before -> after
+        beforeok -> afterok
+        beforenotok -> afternotok
+        beforeany -> afterany
+
+These two snippets are similar in that the dependency structure is the same:
+
+-- snippet 1 --
+a::beforeok: b
+b
+---------------
+
+-- snippet 2 --
+a:
+b::afterok: a
+---------------
+
+calling "pbsmake a" on these two snippets highlights the difference between them:
+
+snippet 1 would cause b to run and (on success) a to run
+
+snippet 2 would simply run a (since b is not specified as a dependency)
+

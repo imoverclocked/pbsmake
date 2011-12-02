@@ -1,0 +1,534 @@
+#!/usr/bin/env python
+#
+# PBS Make
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+
+import os
+import re
+
+class subenv(dict):
+	'''
+	Tracks a sub-environment variable list
+	NB: there is currently no way to unset a variable.
+        However, variables may be set to an empty string though.
+	'''
+
+	stringVarRE = re.compile(r"^(\w+[\w\d]*)\s*([?=]{1,2})\s*(.+)$")
+
+	def __init__(self, newEnv = {}, superEnv = os.environ):
+		super(subenv, self).__init__( newEnv )
+		self.superEnv = superEnv
+
+	def __getitem__(self, key):
+		''' Get a variable from this or a super-environment '''
+		try:
+			return super(subenv, self).__getitem__(key)
+		except KeyError:
+			return self.superEnv[key]
+
+	def copy(self):
+		''' Return shallow copy of superEnv + self '''
+		ret_dict = self.superEnv.copy()
+		for i in iter(super(subenv, self)):
+			ret_dict[i] = self[i]
+		return ret_dict
+
+	def __iter__(self):
+		''' iterate over keys of both environments '''
+		return iter(self.copy())
+
+	def resolveString(self, rawStr):
+		''' resolves variables in a string and returns the resolved string '''
+		# What we can accept:
+		#   ${VAR}
+		# Things that won't resolve:
+		#   $VAR
+		#   $(VAR)
+		# TODO: expand this and process variables more robustly
+		done = False
+		newStr = rawStr
+		while not done:
+			var_start=newStr.find('${')
+			var_end=newStr.find('}')
+			if var_start > var_end:
+				raise Exception, "can not resolve string: " + rawStr
+			if var_start == var_end == -1:
+				done = True
+			elif var_start == -1 or var_end == -1:
+				raise Exception, "can not parse string: " + rawStr
+			else:
+				var_name=newStr[var_start+2:var_end]
+				try:
+					value = self[var_name]
+				except:
+					warnings.warn("undefined variable: " + var_name)
+					value = ""
+				#replace string reference with string
+				newStr = newStr[:var_start] + value + newStr[var_end+1:]
+		return newStr
+
+	def setFromString(self, rawStr):
+		myStr = self.resolveString( rawStr )
+		m = subenv.stringVarRE.match( myStr )
+		if m is None:
+			raise Exception, "Could not recognize variable declaration: " + rawStr
+
+		action = {
+			'?=': lambda k,v: self.setConditional( k, v ),
+			'=':  lambda k,v: self.setUnconditional( k, v )
+			}.get( m.group(2) )
+		if action is None:
+			 raise Exception, "Could not interpret string: " + rawStr
+
+		action( m.group(1), m.group(3) )
+
+	def setConditional(self, k, v):
+		try:
+			self[k]
+		except KeyError:
+			self[k] = v
+
+	def setUnconditional(self, k, v):
+		self[k] = v
+
+class dependency:
+	''' a single dependency (name/type) '''
+
+	def __init__(self, depName, depType):
+		self.name = depName
+		if depType is None:
+			depType = 'afterok'
+		self.type = depType
+
+	def __eq__(self, tgt):
+		if type(tgt) is str:
+			return self.name == tgt
+		return super(dependency, self).__eq__(tgt)
+
+	def __repr__(self):
+		return self.name
+
+class dependencyList(list):
+	''' manage dependencies for a target '''
+
+	def __init__(self):
+		super(dependencyList, self).__init__()
+
+	def add(self, dep, env):
+		resolved = env.resolveString( dep.name )
+		self.append( dependency( resolved, dep.type ) )
+
+class bodyLine(object):
+	''' Track a line in the body definition of a target '''
+
+	@staticmethod
+	def newBodyLine(rawString):
+		if not type(rawString) is str:
+			rawString = str(rawString)
+		m = dynamicBodyLine.matchLineRE.match( rawString )
+		if m:
+			return dynamicBodyLine( m )
+		return bodyLine( rawString )
+
+	def __init__(self, rawString):
+		self.rawString = rawString
+		self.env = {}
+
+	def parsed(self, env):
+		return self.rawString
+
+	def __str__(self):
+		return self.rawString
+
+class dynamicBodyLine(bodyLine):
+	''' Track/process lines based on @(cmd ...) definitions '''
+
+	matchLineRE = re.compile(r"^\s*@\((.*)\)\s*$")
+
+	def __init__(self, rawMatch):
+		super(dynamicBodyLine, self).__init__(rawMatch.group(1))
+
+	def parsed(self, env):
+		cmd_args = self.env.resolveString(self.rawString).split()
+		method = {
+			'echo': self.echo,
+			'cat': self.cat
+			}.get(cmd_args[0])
+		if not method:
+			raise Exception, "no such internal method: " + cmd_args[0]
+		return method( cmd_args )
+
+	def echo(self, cmd_args):
+		return " ".join(cmd_args[1:]) + "\n"
+
+	def cat(self, cmd_args):
+		ret = ""
+		for fn in cmd_args[1:]:
+			ret += open(fn).read()
+		return ret
+
+	def __str__(self):
+		return '@(%s)\n' % (self.rawString)
+
+class staticTarget:
+	''' A way to express a static target (potentially with non-static elements) '''
+
+	def __init__(self, targetName, listContainer, env):
+		self.name = targetName
+		self.env = subenv( env )
+		self.rawDep = dependencyList( )
+		self.body = []
+		self.dependencies = dependencyList( )
+		self.container = listContainer
+		self.env['pm_target_name'] = targetName
+
+	def __eq__(self, tgt):
+		if type(tgt) is str:
+			return self.name == tgt
+		return super(staticTarget, self).__eq__(tgt)
+
+	def addBodyLine(self, line):
+		''' add a line to the body definition '''
+		line = bodyLine.newBodyLine( line )
+		line.env = self.env
+		self.body.append( line )
+
+	def addDependency(self, depName, depType):
+		''' add a raw (unresolved) dependency (string) '''
+		if len(depName) == 0:
+			return
+		self.rawDep.append( dependency(depName, depType) )
+
+	def resolveDependencies(self):
+		''' take all raw dependencies and parse them into real objects '''
+		# At resolution we take the environment and modify it for the target
+		myEnv = self.env
+		deps = self.dependencies
+		# NB: a dependency string may actually be:
+		#   - a variable definition
+		#   - a target
+		#   - a target with an embedded variable
+		# We are looking for things like:
+		#   VAR=${blahblahblah}
+		#   VAR?=${blarg}
+		#   VAR=
+		#   some/file.txt
+		#   ${pathto}/file.txt
+		# For now, assume that a filename will never have an =
+		# TODO: find a better way to do this
+		# TODO: resolve body lines marked for immediate interpolation
+		rawDepList = self.rawDep
+		for rawDep in self.rawDep:
+			rawDepName = rawDep.name
+			if '=' in rawDepName:
+				myEnv.setFromString( rawDepName )
+			else:
+				deps.add( rawDep, myEnv )
+		self.rawDep = []
+
+	def __repr__(self):
+		strRep = ""
+		for d in self.dependencies:
+			strRep += self.name + "::" + d.type + ": " + d.name + "\n"
+		for d in self.rawDep:
+			strRep += self.name + "::(RAW!!!)" + d.type + ": " + d.name + "\n"
+		if len(strRep) == 0:
+			strRep = self.name + ":\n"
+		#myEnv = self.env
+		#for k in myEnv:
+		#	strRep += "\t#%s=%s\n" % (k, myEnv[k])
+		for line in self.body:
+			strRep += "\t%s" % (line.parsed( self.env ))
+		return strRep
+
+class dynamicTarget(staticTarget):
+	''' An extension to staticTarget that allows resolution/matching of the name '''
+
+	def resolveDependencies(self):
+		raise Exception, "Can not resolve dependencies of a dynamic target."
+
+	def resolveTarget(self):
+		''' If the target has a variable in it, resolve it and create a new target '''
+		unresolvedName = self.name
+		resolvedStr = self.env.resolveString( unresolvedName )
+		# Nothing to see here, the target has no variables
+		if resolvedStr == unresolvedName:
+			return
+		# Ok, we had a variable, now let's add the target if it doesn't already exist...
+		newTarget = self.container[ resolvedStr ]
+
+		# If it exists and has no definition then pick the dynamic definition up
+		[ newTarget.addDependency(d.name, d.type) for d in self.rawDep ]
+
+	def matches(self, targetName):
+		''' Does a static target name match this target? '''
+		resTGT = self.env.resolveString( targetName )
+		resSRC = self.env.resolveString( self.name )
+		if not resSRC.count('%') == 1:
+			raise Exception, "Malformed target name: %s" % (resSRC)
+		resSRC = "^(" + resSRC.replace('%', ')(.*)(') + ')$'
+
+		m = re.match(resSRC, targetName)
+		return m
+
+	def addStaticEntry( self, targetList, targetName ):
+		''' Add a static entry based on this dynamicEntry '''
+		entryMatch = self.matches( targetName )
+		if entryMatch is None:
+			raise Exception, "This target does not match the desired entry"
+		newTarget = targetList.get(targetName)
+		# Clone my env and add relevant info...
+		newTarget.env.superEnv = subenv( self.env )
+		newTarget.env['pm_target_match'] = "" + entryMatch.group(2)
+
+		# Clone dependencies
+		for dep in self.rawDep:
+			newTarget.addDependency( dep.name, dep.type )
+
+		# Clone body entries
+		for line in self.body:
+			newTarget.addBodyLine( line )
+
+		newTarget.resolveDependencies()
+
+
+class targetList(list):
+	''' tracks/creates all target objects and maintains order '''
+
+	# All static targets are stored in the class list
+	# all dynamic targets are stored in the dynamicTargets variable
+
+	def __init__(self, env):
+		super(targetList, self).__init__()
+		self.dynamicTargets = []
+		self.env = env
+
+	def __getitem__(self, targetName):
+		if self.isStaticName( targetName ):
+			destArr = self
+			addFn = staticTarget
+		else:
+			destArr = self.dynamicTargets
+			addFn = dynamicTarget
+
+		try:
+			i = destArr.index( targetName )
+			return destArr[ i ]
+		except ValueError:
+			newObj = addFn( targetName, self, self.env )
+			destArr.append( newObj )
+			return newObj
+
+	def isStaticName(self, targetName):
+		''' dynamic names are names which need to be matched/resolved '''
+		# TODO: make this more robust to understand escapes and quotes
+		return not '%' in targetName and not '$' in targetName
+
+	def resolveTargets(self, defaultTarget):
+		''' Any dynamic targets which contain variables in the name must be resolved '''
+		# This does not apply wildcard features and also adds (potentially)
+		# other dynamic targets since a target can have a variable and a wildcard
+		for tgt in self.dynamicTargets:
+			tgt.resolveTarget()
+		
+		if not defaultTarget in self:
+			matches = [tgt for tgt in self.dynamicTargets if tgt.matches(defaultTarget)]
+			if len(matches) < 1:
+				raise Exception, "I don't know how to make " + defaultTarget
+			matches[0].addStaticEntry( self, defaultTarget )
+
+	def resolveTargetsDepends( self, subEnv = os.environ ):
+		''' All targets may have dependencies which have variables in them '''
+		for tgt in self:
+			tgt.resolveDependencies()
+
+class pbsMakeFile(list):
+	''' basic representation of a pbs make file '''
+
+	targetHeaderRE = re.compile(r"^([\w\$\%\.]+[\w\$\{\}\%\d\.-]*)(::[\w+])?:\s*(.*)")
+
+	def __init__(self):
+		self.env = subenv()
+		self.targets = targetList( self.env )
+		self.currentTarget = None
+		self.defaultTarget = None
+
+	def addDecl(self, line):
+		self.env.setFromString( line )
+
+	def target_header(self, line):
+		m = pbsMakeFile.targetHeaderRE.match( line )
+		if not m:
+			raise Exception, "Error: malformed target header: " + line
+		targetName = m.group(1)
+		targetDepType  = m.group(2)
+		targetDep  = m.group(3)
+		self.currentTarget = self.targets.get(targetName)
+		self.currentTarget.addDependency( targetDep, targetDepType )
+		if self.defaultTarget is None:
+			self.defaultTarget = self.currentTarget
+
+	def target_body(self, line):
+		# Get rid of beginning tab char...
+		self.currentTarget.addBodyLine( line[1:] )
+
+	def resolveReferences(self, defaultTarget = None):
+		if defaultTarget is None:
+			defaultTarget=self.defaultTarget
+		if defaultTarget is None:
+			raise Exception, "I don't know what to do!"
+		tgts = self.targets
+		tgts.resolveTargets( defaultTarget )
+		tgts.resolveTargetsDepends( defaultTarget )
+
+	def comment(self, line):
+		pass
+	def blank(self, line):
+		pass
+
+	def __repr__(self):
+		strRep = ""
+		for tgt in self.targets:
+			strRep += repr(tgt)
+		return strRep
+
+class pbsMakeParser:
+	''' Parses the top-level Makefile and hands off specifics to sub-modules '''
+
+	commentRE = re.compile(r"^\s*\#")
+	vardeclRE = re.compile(r"^(\w+[\w\d]*)\s*([?=]{1,2})\s*(.+)")
+	tgtheadRE = re.compile(r"^([\w\$\%]+[\w\$\{\}\%\d:\.-]*):\s*")
+	tgtbodyRE = re.compile(r"^\t(.+)")
+	witespcRE = re.compile(r"^\s*$")
+
+	line_types = {
+		'blank':       witespcRE,
+		'comment':     commentRE,
+		'var_decl':    vardeclRE,
+		'target_head': tgtheadRE,
+		'target_body': tgtbodyRE
+		}
+
+	def __init__(self, filePath):
+		fh = open(filePath, 'r')
+		self.fh = fh
+
+	def line_handler(self, fh):
+		''' generate full lines (honor lines ending with an escape) '''
+		for line in fh:
+			while( len(line) > 2 and line[-2] == '\\' ):
+				line = line[:-2] + fh.next()
+			yield line
+
+	def parse(self):
+		mkf = pbsMakeFile()
+		srcf = self.line_handler(self.fh)
+		line_behaviours = {
+			'var_decl': mkf.addDecl,
+			'target_head': mkf.target_header,
+			'target_body': mkf.target_body,
+			'comment': mkf.comment,
+			'blank': mkf.blank
+			}
+		for line in srcf:
+			line_type = self.line_type( line )
+			try:
+				fn = line_behaviours.get(line_type)
+			except:
+				raise Exception, "Could not understand line: " + line
+			fn(line)
+		return mkf
+
+	def line_type(self, line):
+		types = filter(
+			lambda x: pbsMakeParser.line_types[x].match(line),
+			pbsMakeParser.line_types)
+		# TODO: Remove Debug
+		# print types, ": ", line, 
+		if len(types) == 1:
+			return types[0]
+		if len(types) == 0:
+			raise Exception, "Error, line is not recognized: " + line
+		if 'target_body' in types:
+			return 'target_body'
+		if 'comment' in types:
+			return 'comment'
+		if 'blank' in types:
+			return 'blank'
+		raise Exception, "Error, line matches multiple formats: " + line
+
+class pbsMakeTree(dict):
+	pass
+
+def usage(exit=True):
+	print '''Usage:
+	On the Command line:
+		pbsmake [-f Makefile] [-h] [target [target...]]
+
+	As an interpreter:
+		#!/usr/bin/env pbsmake -s'''
+	if exit:
+		sys.exit(2)
+
+#######
+# TODO: make this a little smarter and use getopt
+#   -- also let's support this for use as a #!script ... 
+if __name__ == '__main__':
+
+	prog_vars = {}
+	prog_vars['makefile'] = 'Makefile'
+
+	import getopt, sys
+	try:
+		opts, args = getopt.getopt(sys.argv[1:],
+				's:hf:',
+				['help', 'makefile='])
+	except getopt.GetOptError, err:
+		print str(err)
+		usage()
+
+	for opt in opts:
+		action = {
+			'-s': lambda arg: prog_vars.__setitem__('makefile', arg),
+			'-f': lambda arg: prog_vars.__setitem__('makefile', arg),
+			'--makefile': lambda arg: prog_vars.__setitem__('makefile', arg),
+			'-h': lambda arg: usage(),
+			'--help': lambda arg: usage()
+		}.get( opt[0] )
+		arg = ''
+		try:
+			arg = opt[1]
+		except:
+			arg = None
+		action(arg)
+
+	try:
+		makefile = pbsMakeParser(prog_vars['makefile']).parse()
+	except Exception, err:
+		print "While parsing makefile: ", str(err)
+		sys.exit(-1)
+
+	try:
+		for arg in args:
+			makefile.resolveReferences( arg )
+	except Exception, err:
+		print "While resolving dependencies: ", str(err)
+		sys.exit(-1)
+
+	print "========================================"
+	print makefile
+

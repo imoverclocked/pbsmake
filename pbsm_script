@@ -1,0 +1,12 @@
+#!/usr/bin/env pbsmake -s
+
+default: test_f.txt
+clean: clean-test_f.txt
+
+%.txt:
+	echo generating ${pm_target_name}
+	touch ${pm_target_name}
+
+clean-%:
+	echo removing ${pm_target_name}
+	rm -f ${pm_target_name}

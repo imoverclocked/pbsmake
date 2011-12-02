@@ -1,0 +1,174 @@
+
+Need: an easy way to specify jobs with dependencies
+Solution: PBS + Make syntax
+
+Some modifications to the standard Make syntax may have to be adopted in order to support
+interesting properties of dependencies. eg: PBS jobs can be run on failure rather than
+requiring success.
+
+An initial example shows some intended capabilities:
+--------------------------------------------------------------------------------
+SRC_PATH=/path/to
+FILENAME?=default.txt
+
+%.txt: ${SRC_PATH}/$*.head ${SRC_PATH}/$*.body ${SRC_PATH}/$*.foot
+	#PBS -q text_queue
+	#PBS -N $*
+	cat ${SRC_PATH}$@.head ${SRC_PATH}$@.body ${SRC_PATH}$@.foot > $@.txt
+
+%.head: ${SRC_PATH}/generic.head
+	#PBS -q text_queue
+	#PBS -N $@
+	ln -s $< $@
+
+%.foot: ${SRC_PATH}/generic.foot
+	#PBS -q text_queue
+	#PBS -N $@
+	ln -s $< $@
+--------------------------------------------------------------------------------
+
+In this simple example, default.txt is made from three files:
+    /path/to/default.head
+    /path/to/default.body
+    /path/to/default.foot
+
+The %.txt rule has variable references in the dependency list. In normal make
+this does not work as you would expect the above example to work. In
+particular, $* is evaluated too early and is empty when default.txt uses %.txt
+in order to fill its definition. This means dependency resolution needs to wait
+until the very last possible chance in order to resolve variable references.
+
+Another interesting issue is that of variable expansion within the target body
+definition. Since the block has references to $@ and $*, the block needs to
+interpolate before the script is sent to the job scheduler. However, knowing
+that the text you are going to send in the method body is actually a script,
+the following would seem to be a valid use-case to the un-initiated:
+
+--------------------------------------------------------------------------------
+%.txt: ${SRC_PATH}/$*.head ${SRC_PATH}/$*.body ${SRC_PATH}/$*.foot
+	#PBS -q text_queue
+	#PBS -N $*
+	HEAD=${SRC_PATH}/$*.head
+	BODY=${SRC_PATH}/$*.body
+	FOOT=${SRC_PATH}/$*.foot
+	cat $HEAD $BODY $FOOT > $@
+--------------------------------------------------------------------------------
+
+The problem here is that $HEAD $BODY $FOOT are not defined in the Makefile
+environment, only in the script environment. If they are interpolated by pbsmake
+then the script will end up running "cat > default.txt". On the other hand, if
+the script is interpreted by bash and variables are not expanded then it will
+end up running "cat $HEAD $BODY $FOOT > $@"
+
+In bash, $@ means something entirely different than in make. There are a few
+ways to move forward depending on design goals. Extreme make-compatability is
+not as interesting as extreme usability and predictability so we will opt for a
+solution that interpolates late but gets rid of the arcane $@ $* $< ... special
+make variables and give them names. Then these names can be placed into the
+environment and accessed just as any other variable.
+
+Using this new knowledge we can rewrite the %.txt target as:
+--------------------------------------------------------------------------------
+%.txt: ${SRC_PATH}/${pm_target_match}.head
+%.txt: ${SRC_PATH}/${pm_target_match}.body
+%.txt: ${SRC_PATH}/${pm_target_match}.foot
+	#PBS -q text_queue
+	#PBS -N ${pm_target_match}
+	HEAD=${SRC_PATH}/${pm_target_match}.head
+	BODY=${SRC_PATH}/${pm_target_match}.body
+	FOOT=${SRC_PATH}/${pm_target_match}.foot
+	cat $HEAD $BODY $FOOT > ${pm_target_name}
+--------------------------------------------------------------------------------
+
+However, we still have one issue. The comment will not be interpolated by our
+shell which means that "#PBS -N" will be given as a raw line to the job
+scheduler. In fact, even if the shell *did* interpolate this it would be done
+too late for the job scheduler to pick it up. Therefor we need some way of
+explicitely resolving tokens before the script is written out:
+
+--------------------------------------------------------------------------------
+%.txt: ${SRC_PATH}/${pm_target_match}.head
+%.txt: ${SRC_PATH}/${pm_target_match}.body
+%.txt: ${SRC_PATH}/${pm_target_match}.foot
+	#PBS -q text_queue
+	@(echo #PBS -N ${pm_target_match})
+	HEAD=${SRC_PATH}/${pm_target_match}.head
+	BODY=${SRC_PATH}/${pm_target_match}.body
+	FOOT=${SRC_PATH}/${pm_target_match}.foot
+	cat $HEAD $BODY $FOOT > ${pm_target_name}
+--------------------------------------------------------------------------------
+
+For now, the scope of this syntax will remain loosly defined as any line
+beginning with @( and ending with ). Commands other than "echo" may be defined
+in the future in order to support various types of includes.
+
+
+=== Dependency Types ===
+
+qsub in torque supports multiple dependency types. see the separate file
+"docs/dependency_types" for an explanation of how these should work.
+
+
+=== Processing Order ===
+
+Read in raw file (pbsMakeParser), minimal parse to understand:
+
+ - top-level variable declarations
+ - target definitions
+ - target dependencies
+ - include external files
+ - comments
+
+ -- this seeds a pbsMakeFile object
+
+Seed environment into all static targets
+  -- sets up a base environment on which to build individual environments
+
+Now we have a pbsMakeFile object, it has static and dynamic targets inside.
+
+Create a pbsMakeTree object given the pbsMakeFile object. Use it to:
+  -- add default targets from commandline
+    -- pbsMakeFile returns static targets when asked for a target by name
+  -- if the tree is empty, ask pbsMakeFile for the default target
+    -- returns a static target
+
+  -- on adding a target, resolve all dependencies as new targets
+    -- continue to ask pbsMakeFile for static targets and populate tree
+
+pbsMakeFile is called from pbsMakeTree to accomplish:
+  -- resolving targets (from dynamic/static/filesystem)
+    -- always returns a static/rawFile target object
+      -- generate static targets if a dynamic target matches
+      -- return a rawFile target if no target matches (see shell globs below)
+  -- return default target
+    -- return the "first" target iff it's a static target
+      -- it can also be a dynamic target with a variable name/shell glob in it
+        -- resolve and return in this case (may be a list of targets)
+      -- return None otherwise
+
+  -- shell globs generate a sticky situation WRT dependencies
+    -- attempt to glob in filesystem
+      -- for each file found, return an appropriate target
+        -- appropriate: does a static/dynamic target match?
+          -- no: return rawFile target
+    -- no matches? error out: no rule to make target ...
+
+now that we have a generic tree, we can do a lot of neat things with it:
+  -- generate a graph (dot/dotty/...)
+  -- show what would be done textually (output static makefile definition)
+  -- submit jobs to actually do the work
+
+Recursively resolve the default target dependencies:
+
+  Recurse on each dependency to ensure that there is a rule or there is a file
+    -- figure out reasonable way of killing circular dependencies
+    -- maybe simply die on circular dependencies?
+    -- die on missing dependency
+
+Recursively specify jobs (depth-first) to fill dependencies
+
+  Job needs to be run if:
+    Some sub-dependency is newer
+      -- what about afterok/afternotok semantics?
+    Target file does not exist
+
