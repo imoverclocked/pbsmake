@@ -219,7 +219,7 @@ class StaticTarget(object):
 
     def addDependency(self, depName, depType):
         ''' add a raw (unresolved) dependency (string) '''
-        if len(depname):
+        if len(depName):
             self.rawDep.append(Dependency(depName, depType))
 
     def resolveDependencies(self):
