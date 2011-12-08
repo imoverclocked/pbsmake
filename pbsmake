@@ -124,7 +124,7 @@ class Dependency(object):
             return self.name == tgt
         return super(Dependency, self).__eq__(tgt)
 
-    def __repr__(self):
+    def __str__(self):
         return self.name
 
 
@@ -249,7 +249,7 @@ class StaticTarget(object):
                 deps.add(rawDep, myEnv)
         self.rawDep = []
 
-    def __repr__(self):
+    def __str__(self):
         strRep = ""
         for d in self.dependencies:
             strRep += self.name + "::" + d.type + ": " + d.name + "\n"
@@ -417,10 +417,10 @@ class PBSMakeFile(list):
     def blank(self, line):
         pass
 
-    def __repr__(self):
+    def __str__(self):
         strRep = ""
         for tgt in self.targets:
-            strRep += repr(tgt)
+            strRep += str(tgt)
         return strRep
 
 
