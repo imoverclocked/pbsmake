@@ -1,0 +1,22 @@
+TARGET=target1
+
+${TARGET}: target2 target3
+	@(echo "target1")
+
+target2: target3 target4
+	@(echo "target2")
+
+target3: target4
+	@(echo "target3")
+
+target4:
+	@(echo "target4")
+
+%.txt:
+	@(echo "txt rule")
+
+# This is a comment.
+
+FOOBAR="something"
+${FOOBAR}: target4
+	@(echo ${FOOBAR})
