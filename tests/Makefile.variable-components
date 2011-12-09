@@ -1,0 +1,16 @@
+FOO=target1
+BAR=target2
+BAZ=target3
+BUB=target4
+
+${FOO}: ${BAR} ${BAZ}
+	@(echo ${FOO})
+
+${BAR}: ${BAZ} ${BUB}
+	@(echo ${BAR})
+
+${BAZ}: ${BUB}
+	@(echo ${BAZ})
+
+${BUB}:
+	@(echo ${BUB})
