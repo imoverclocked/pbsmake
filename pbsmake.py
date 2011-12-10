@@ -28,6 +28,33 @@ class Env(object):
         return string
 
 
+# Based off RADLogic's topsort - http://www.radlogic.com/releases/topsort.py
+def buildorder(pairlist):
+    num_parents = {}
+    children = {}
+    for parent, child in pairlist:
+        if not num_parents.has_key(parent):
+            num_parents[parent] = 0
+        if not num_parents.has_key(child):
+            num_parents[child] = 0
+        num_parents[child] += 1
+        children.setdefault(parent, []).append(child)
+
+    ordered = [v for v in num_parents.iterkeys() if num_parents[v] == 0]
+    for parent in ordered:
+        del num_parents[parent]
+        if children.has_key(parent):
+            for child in children[parent]:
+                num_parents[child] -= 1
+                if num_parents[child] == 0:
+                    ordered.append(child)
+            del children[parent]
+
+    if num_parents:
+        raise Exception('dependency cycle detected')
+    return reversed(ordered)
+
+
 def parse(iterable, env=Env()):
     handlers = {}
     class pattern(object):
@@ -88,7 +115,6 @@ if __name__ == '__main__':
     parser.add_argument('-f', '--makefile', default='Makefile')
     args = parser.parse_args()
 
-    env = Env({'TARGET': 'target1'})
     with open(args.makefile) as f:
         makefile = (line.rstrip() for line in f.readlines() if line.strip())
         parse(makefile)
