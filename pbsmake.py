@@ -1,10 +1,9 @@
+from collections import defaultdict
 import os
 import re
 
 
 class Env(object):
-    """Maintains the environment variables for local and global scope."""
-
     def __init__(self, env={}, parent=os.environ):
         self.env = env.copy()
         self.parent = parent.copy()
@@ -55,6 +54,44 @@ def buildorder(pairlist):
     return reversed(ordered)
 
 
+class Makefile(object):
+    def __init__(self, default=None):
+        self.targets = defaultdict(list)
+        self.default = default
+
+    def addtarget(self, name, components=None, cmds=None):
+        self.current = name
+        self.targets[name] = defaultdict(list)
+        self.addcomponents(name, components)
+        self.addcmds(name, cmds)
+
+    def addcmds(self, name, cmds):
+        if isinstance(cmds, basestring):
+            cmds = [cmds]
+        self.targets[name]['cmds'] += cmds or []
+
+    def addcomponents(self, name, components):
+        if isinstance(components, basestring):
+            components = [components]
+        self.targets[name]['components'] += components or []
+
+    def build(self, target=None):
+        target = target or self.default
+        assert target in self.targets, "unknown build target '%s'" % target
+
+        pairlist = []
+        for target, details in self.targets.iteritems():
+            for component in details['components']:
+                pairlist.append((target, component))
+
+        schedule = buildorder(pairlist)
+        head = job = next(schedule)
+        print 'qsub -h', head
+        for target in schedule:
+            print 'qsub -W "depend=afterok:%s" %s' % (job, target)
+            job = target
+        print 'qrls -h u', head
+
 def parse(iterable, env=Env()):
     handlers = {}
     class pattern(object):
@@ -70,7 +107,7 @@ def parse(iterable, env=Env()):
     def vardecl(match, env=env):
         name, value = match.groups()
         env[name] = value
-        return name, value
+        return name + '=' + value
 
     @pattern(r'^([a-zA-Z_\$\%][a-zA-Z_0-9\{\}\.]*)\s*:\s*(.*)$')
     def target(match, env=env):
@@ -79,9 +116,9 @@ def parse(iterable, env=Env()):
         components = []
         if len(interpolated) > 1:   # we have components to parse
             line = ' '.join(word for word in interpolated[1:])
-            match = re.search('(\w+)', line)
-            components = match.groups()
-        return name, components
+            components = re.findall('\w+', line)
+        makefile.addtarget(name, components)
+        return name + ': ' + ' '.join(str(c) for c in components)
 
     @pattern(r'^\s*\#\s*(.*)')
     def comment(match, env=env):
@@ -91,11 +128,13 @@ def parse(iterable, env=Env()):
     @pattern(r'^\t(.+)$')
     def command(match, env=env):
         cmd = match.group(1)
-        return '\tcmd(%s)' % cmd
+        makefile.addcmds(makefile.current, cmd)
+        return '\t' + cmd
 
     def notimplemented(*args):
         return 'not implemented: ' + ', '.join(args)
 
+    makefile = Makefile()
     for line in iterable:
         result = None
         for pattern, function in handlers.iteritems():
@@ -105,7 +144,7 @@ def parse(iterable, env=Env()):
                 break
         if result is None:
             result = notimplemented(line)
-        print result
+    return makefile
 
 
 if __name__ == '__main__':
@@ -116,8 +155,10 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     with open(args.makefile) as f:
-        makefile = (line.rstrip() for line in f.readlines() if line.strip())
-        parse(makefile)
+        contents = [line.rstrip() for line in f.readlines() if line.strip()]
+        makefile = parse(contents)
+        for target in args.target:
+            makefile.build(target)
 
 
 # vim: ts=4 sw=4 et :
