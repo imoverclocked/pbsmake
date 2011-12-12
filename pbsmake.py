@@ -87,9 +87,14 @@ class Makefile(object):
         schedule = buildorder(pairlist)
         head = job = next(schedule)
         print 'qsub -h', head
+        for cmd in self.targets[head]['cmds']:
+            print '\t', cmd
         for target in schedule:
             print 'qsub -W "depend=afterok:%s" %s' % (job, target)
+            for cmd in self.targets[target]['cmds']:
+                print '\t', cmd
             job = target
+            print ''
         print 'qrls -h u', head
 
 def parse(iterable, env=Env()):
@@ -120,7 +125,7 @@ def parse(iterable, env=Env()):
         makefile.addtarget(name, components)
         return name + ': ' + ' '.join(str(c) for c in components)
 
-    @pattern(r'^\s*\#\s*(.*)')
+    @pattern(r'^\#\s*(.*)')
     def comment(match, env=env):
         line = match.group(1)
         return '# ' + line
@@ -155,7 +160,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     with open(args.makefile) as f:
-        contents = [line.rstrip() for line in f.readlines() if line.strip()]
+        contents = (line.rstrip() for line in f.readlines() if line.strip())
         makefile = parse(contents)
         for target in args.target:
             makefile.build(target)
