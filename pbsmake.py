@@ -1,6 +1,7 @@
-from collections import defaultdict
 import os
 import re
+import collections
+import subprocess
 
 
 class Env(object):
@@ -56,12 +57,12 @@ def buildorder(pairlist):
 
 class Makefile(object):
     def __init__(self, default=None):
-        self.targets = defaultdict(list)
+        self.targets = collections.defaultdict(list)
         self.default = default
 
     def addtarget(self, name, components=None, cmds=None):
         self.current = name
-        self.targets[name] = defaultdict(list)
+        self.targets[name] = collections.defaultdict(list)
         self.addcomponents(name, components)
         self.addcmds(name, cmds)
 
@@ -84,18 +85,19 @@ class Makefile(object):
             for component in details['components']:
                 pairlist.append((target, component))
 
-        schedule = buildorder(pairlist)
-        head = job = next(schedule)
-        print 'qsub -h', head
-        for cmd in self.targets[head]['cmds']:
-            print '\t', cmd
-        for target in schedule:
-            print 'qsub -W "depend=afterok:%s" %s' % (job, target)
-            for cmd in self.targets[target]['cmds']:
-                print '\t', cmd
-            job = target
-            print ''
-        print 'qrls -h u', head
+        pipe = subprocess.PIPE
+        kargs = dict(stdout=pipe, stdin=pipe, stderr=pipe)
+        job = None
+        for name in buildorder(pairlist):
+            cmds = '\n'.join(cmd for cmd in self.targets[name]['cmds'])
+            if job is None:
+                p = subprocess.Popen(['qsub', '-'], **kargs)
+            else:
+                depend = '"depend=afterok:%s"' % job
+                p = subprocess.Popen(['qsub', '-W', depend, '-'], **kargs)
+            job = p.communicate(cmds + '\n')[0].strip()
+            print '%s(%s) scheduled' % (name, job)
+
 
 def parse(iterable, env=Env()):
     handlers = {}
