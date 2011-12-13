@@ -21,6 +21,19 @@ and takes an optional path to a makefile. If no makefile is given, the default
 
     $ python pbsmake.py -f some/Makefile myothertarget
 
+Also, pbsmake can be used as a script interpreter by using -f as follows.
+
+    --- makescript ---
+    #!/usr/bin/env pbsmake.py -f
+
+    target1: target2
+    	echo running target 1
+
+    target2:
+    	echo running target 2
+    ------------------
+
+    $ ./makescript target1
 
 ## authors
 
