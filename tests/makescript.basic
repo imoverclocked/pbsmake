@@ -1,0 +1,31 @@
+#!/usr/bin/env pbsmake.py -f
+#
+# A three-level binary tree of sleeping processes
+#
+# NB: pbsmake needs to be in your path. (hint: PATH=../:./:$PATH)
+#
+# EG: env PATH=../:$PATH ./makescript.basic sleep_top
+
+DELAY=5
+
+sleep_top: sleep_l sleep_r
+	sleep $DELAY
+
+sleep_l: sleep_l_l sleep_l_r
+	sleep $DELAY
+
+sleep_r: sleep_r_l sleep_r_r
+	sleep $DELAY
+
+sleep_l_l:
+	sleep $DELAY
+
+sleep_l_r:
+	sleep $DELAY
+
+sleep_r_l:
+	sleep $DELAY
+
+sleep_r_r:
+	sleep $DELAY
+
