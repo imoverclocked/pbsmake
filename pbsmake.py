@@ -64,6 +64,7 @@ class Makefile(object):
         self.default = default
 
     def addtarget(self, name, components=None, cmds=None):
+        self.default = self.default or name
         self.current = name
         self.targets[name] = collections.defaultdict(list)
         self.addcomponents(name, components)
@@ -88,7 +89,7 @@ class Makefile(object):
             for component in details['components']:
                 pairlist.append((target, component))
 
-        order = tsort(pairlist)
+        order = tsort(pairlist) or [buildtarget]
         not1 = functools.partial(operator.ne, buildtarget)
         schedule = list(itertools.dropwhile(not1, order))
         schedule.reverse()
@@ -165,13 +166,15 @@ def parse(iterable, env=Env()):
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('target', help='The target to build', nargs='+')
+    parser.add_argument('target', help='The target to build', nargs='*')
     parser.add_argument('-f', '--makefile', default='Makefile')
     args = parser.parse_args()
 
     with open(args.makefile) as f:
         contents = (line.rstrip() for line in f.readlines() if line.strip())
         makefile = parse(contents)
+        if not args.target:
+            args.target = [makefile.default]
         for target in args.target:
             makefile.build(target)
 
