@@ -1,6 +1,9 @@
 import os
 import re
 import collections
+import functools
+import itertools
+import operator
 import subprocess
 
 
@@ -28,8 +31,8 @@ class Env(object):
         return string
 
 
-# Based off RADLogic's topsort - http://www.radlogic.com/releases/topsort.py
-def buildorder(pairlist):
+# RADLogic's topsort - http://www.radlogic.com/releases/topsort.py
+def tsort(pairlist):
     num_parents = {}
     children = {}
     for parent, child in pairlist:
@@ -52,7 +55,7 @@ def buildorder(pairlist):
 
     if num_parents:
         raise Exception('dependency cycle detected')
-    return reversed(ordered)
+    return ordered
 
 
 class Makefile(object):
@@ -76,19 +79,24 @@ class Makefile(object):
             components = [components]
         self.targets[name]['components'] += components or []
 
-    def build(self, target=None):
-        target = target or self.default
-        assert target in self.targets, "unknown build target '%s'" % target
+    def build(self, buildtarget=None):
+        buildtarget = buildtarget or self.default
+        assert buildtarget in self.targets
 
         pairlist = []
         for target, details in self.targets.iteritems():
             for component in details['components']:
                 pairlist.append((target, component))
 
+        order = tsort(pairlist)
+        not1 = functools.partial(operator.ne, buildtarget)
+        schedule = list(itertools.dropwhile(not1, order))
+        schedule.reverse()
+
         pipe = subprocess.PIPE
         kargs = dict(stdout=pipe, stdin=pipe, stderr=pipe)
         job = None
-        for name in buildorder(pairlist):
+        for name in schedule:
             cmds = '\n'.join(cmd for cmd in self.targets[name]['cmds'])
             if job is None:
                 p = subprocess.Popen(['qsub', '-'], **kargs)
