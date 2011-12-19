@@ -20,14 +20,11 @@ class Env(object):
     def __setitem__(self, key, value):
         self.env[key] = value
 
-    def __repr__(self):
-        return '%s(%s)' % (type(self).__name__, repr(self.env))
-
     def interp(self, string, regex=r'\${[a-zA-Z_][a-zA-Z_0-9]*}'):
         match = re.search(regex, string)
         while match:
             start, end = match.span()
-            var = string[start + 2 : end - 1]
+            var = string[start + 2:end - 1]
             string = ''.join((string[:start], self[var], string[end:]))
             match = re.search(regex, string)
         return string
@@ -61,11 +58,16 @@ def tsort(pairlist):
 
 
 class Makefile(object):
-    def __init__(self, default=None):
+    def __init__(self):
         self.targets = collections.defaultdict(list)
-        self.default = default
+        self.default = None
+
+    @staticmethod
+    def canonicalize(name):
+        return re.sub('::afterok', '', name)
 
     def addtarget(self, name, components=None, cmds=None):
+        name = self.canonicalize(name)
         self.default = self.default or name
         self.current = name
         self.targets[name] = collections.defaultdict(list)
@@ -80,10 +82,11 @@ class Makefile(object):
     def addcomponents(self, name, components):
         if isinstance(components, basestring):
             components = [components]
-        self.targets[name]['components'] += components or []
+        components = map(self.canonicalize, components or [])
+        self.targets[name]['components'] += components
 
     def build(self, buildtarget=None):
-        buildtarget = buildtarget or self.default
+        buildtarget = self.canonicalize(buildtarget) or self.default
         assert buildtarget in self.targets
 
         pairlist = []
@@ -96,18 +99,37 @@ class Makefile(object):
         schedule = list(itertools.dropwhile(not1, order))
         schedule.reverse()
 
-        pipe = subprocess.PIPE
-        kargs = dict(stdout=pipe, stdin=pipe, stderr=pipe)
-        job = None
+        class Qsub(object):
+            def __init__(self, targets):
+                pipe = subprocess.PIPE
+                self.torqueid = None
+                self.pipeargs = dict(stdout=pipe, stdin=pipe, stderr=pipe)
+                self.targets = targets
+                self.proc = subprocess.Popen
+
+            def __call__(self, name, torqueid=None):
+                self.torqueid = torqueid or self.torqueid
+                cmds = '\n'.join(cmd for cmd in self.targets[name]['cmds'])
+                if self.torqueid is None:
+                    p = self.proc(['qsub', '-'], **self.pipeargs)
+                else:
+                    dep = name.partition('::')[-1] or 'afterok'
+                    arg = '"depend=%s:%s"' % (dep, self.torqueid)
+                    p = self.proc(['qsub', '-W', arg, '-'], **self.pipeargs)
+                self.torqueid = p.communicate(cmds + '\n')[0].strip()
+                self.targets[name]['torqueid'] = self.torqueid
+                return '%s(%s) scheduled' % (name, self.torqueid)
+
+        qsub = Qsub(self.targets)
         for name in schedule:
-            cmds = '\n'.join(cmd for cmd in self.targets[name]['cmds'])
-            if job is None:
-                p = subprocess.Popen(['qsub', '-'], **kargs)
-            else:
-                depend = '"depend=afterok:%s"' % job
-                p = subprocess.Popen(['qsub', '-W', depend, '-'], **kargs)
-            job = p.communicate(cmds + '\n')[0].strip()
-            print '%s(%s) scheduled' % (name, job)
+            print qsub(name)
+
+        for target in self.targets.iterkeys():
+            if '::' in target and target not in schedule:
+                parent = re.sub('::.+', '', target)
+                if parent in schedule:
+                    torqueid = self.targets[parent]['torqueid']
+                    print qsub(target, torqueid)
 
 
 def parse(iterable, env=Env()):
@@ -127,16 +149,17 @@ def parse(iterable, env=Env()):
         env[name] = value
         return name + '=' + value
 
-    @pattern(r'^([a-zA-Z_\$\%][a-zA-Z_0-9\{\}\.]*)\s*:\s*(.*)$')
+    @pattern(r'^([a-zA-Z_\$\%][a-zA-Z_0-9\{\}]*)\s*:(?::([a-zA-Z_\$][a-zA-Z_0-9\{\}]*):)?\s*(.*)$')
     def target(match, env=env):
-        interpolated = [env.interp(m) for m in match.groups() if m]
-        name = interpolated[0]
-        components = []
-        if len(interpolated) > 1:   # we have components to parse
-            line = ' '.join(word for word in interpolated[1:])
-            components = re.findall('\w+', line)
-        makefile.addtarget(name, components)
-        return name + ': ' + ' '.join(str(c) for c in components)
+        labels = ('name', 'dep', 'components')
+        groups = dict(itertools.izip(labels, match.groups()))
+        for k, v in groups.iteritems():
+            groups[k] = env.interp(v) if v else v
+        name = groups['name']
+        dep = groups['dep'] or 'afterok'
+        components = re.findall('\w+', groups['components'])
+        makefile.addtarget(name + '::' + dep, components)
+        return '%s::%s: %s' % (name, dep, ' '.join(str(c) for c in components))
 
     @pattern(r'^\#\s*(.*)')
     def comment(match, env=env):
@@ -159,6 +182,7 @@ def parse(iterable, env=Env()):
             match = re.match(pattern, line)
             if match is not None:
                 result = function(match)
+                #print '%-10s: %s' % (function.__name__, result)
                 break
         if result is None:
             result = notimplemented(line)

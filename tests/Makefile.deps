@@ -1,0 +1,14 @@
+TARGET=target1
+onerror=afternotok
+
+${TARGET}: target2
+	#PBS -N target1 -V
+	echo foo
+
+${TARGET}::${onerror}:
+	#PBS -V
+	echo I failed
+
+target2:
+	#PBS -N target2 -V
+	echo woo
