@@ -20,7 +20,7 @@ class Env(object):
     def __setitem__(self, key, value):
         self.env[key] = value
 
-    def interp(self, string, regex=r'\${[a-zA-Z_][a-zA-Z_0-9]*}'):
+    def interp(self, string, regex=r'(?<!\\)\${[a-zA-Z_][a-zA-Z_0-9]*}'):
         match = re.search(regex, string)
         while match:
             start, end = match.span()
@@ -169,6 +169,8 @@ def parse(iterable, env=Env()):
     @pattern(r'^\t(.+)$')
     def command(match, env=env):
         cmd = match.group(1)
+        if cmd[:4] == '#PBS':
+            cmd = env.interp(cmd)
         makefile.addcmds(makefile.current, cmd)
         return '\t' + cmd
 
