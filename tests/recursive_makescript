@@ -1,0 +1,19 @@
+#!/usr/bin/env pbsmake.py -f
+#
+# Creates a totem-pole of dependencies and should hit a base-case
+# For an infinitely tall pole, use the target: inf
+
+curse: recursed
+	/bin/true
+
+recurse%------------------------------:
+	/bin/false
+
+recurse%: recurse$*-
+	/bin/true
+
+inf%: inf%-
+	/bin/false
+
+test:
+	echo testing 1 2 3
