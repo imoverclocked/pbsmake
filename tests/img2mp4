@@ -1,5 +1,5 @@
-#!/usr/bin/env pbsmake
-# This example turns a .IMG into a series of videos using blender/ffmpeg
+#!/usr/bin/env pbsmake -f
+# This turns a .IMG into a series of videos using blender/ffmpeg
 #   .IMG -> .blend -> *.png -> .mp4
 
 BLENDER_PATH?=/HiRISE/Users/$(id -u -n)/DTM_blender
@@ -23,19 +23,23 @@ IMAGE_FORMAT="%04d.png"
 
 ## Default target to describe how to use this file
 help::local_target:
-	@echo Quick Usage/Examples:
-	@echo '1)' say we have a released IMG file and we want to create orbits:
-	@echo '  ' $DTM_IMG_PATH/.../DTEEC_006774_2020_007341_2020_A01.IMG
-	@echo '  ' pbsmake orbits_DTEEC_006774_2020_007341_2020_A01
-	@echo
-	@echo '2)' say we have a .blend file and want to render it:
-	@echo '  ' $BLENDER_PATH/DTEEC_006774_2020_007341_2020_A01-FlyAround.blend
-	@echo '  ' pbsmake orbits_DTEEC_006774_2020_007341_2020_A01-FlyAround
-	@echo
-	@echo '3)' we want to create orbits for an unreleased .IMG file:
-	@echo '  ' /path/to/DTEEC_000000_0000_000000_0000_A01.IMG
-	@echo '  ' env BLENDER_PATH=/path/to/ pbsmake orbits_DTEEC_000000_0000_000000_0000_A01
-	@echo
+	echo Quick Usage/Examples:
+	echo '1)' create a movie of a released IMG file:
+	echo '  ' $DTM_IMG_PATH/.../DTEEC_006774_2020_007341_2020_A01.IMG
+	echo '  ' img2mp4 mp4_DTEEC_006774_2020_007341_2020_A01
+	echo
+	echo '2)' render a modified .blend file:
+	echo '  ' $BLENDER_PATH/DTEEC_006774_2020_007341_2020_A01-FlyAround.blend
+	echo '  ' img2mp4 orbits_DTEEC_006774_2020_007341_2020_A01-FlyAround
+	echo
+	echo '3)' create orbits for an unreleased .IMG file:
+	echo '  ' /path/to/DTEEC_000000_0000_000000_0000_A01.IMG
+	echo '  ' env DTM_IMG_PATH=/path/to/ img2mp4 orbits_DTEEC_000000_0000_000000_0000_A01
+	echo
+	echo '3)' render a .blend in a non-standard location:
+	echo '  ' /path/to/DTEEC_000000_0000_000000_0000_A01-modified.blend
+	echo '  ' env BLENDER_PATH=/path/to/ img2mp4 orbits_DTEEC_000000_0000_000000_0000_A01
+	echo
 
 ################################################################################
 ## Create a .blend from a .IMG
@@ -185,7 +189,7 @@ orbits_%::afterany: ${RENDERED_PATH}/${pm_target_match}-1080.mp4
 	#PBS -l walltime=00:10:00
 	#PBS -l mem=128m
 	#PBS -S /bin/bash
-	@echo all dependencies rendered ... cleaning up
+	echo all dependencies rendered ... cleaning up
 	if [[ "$KEEP_FRAMES" == 'false' ]]; then
 	  rm -f $RENDERED_PATH/frames/*.png
 	  rmdir $RENDERED_PATH/frames 2> /dev/null || true
