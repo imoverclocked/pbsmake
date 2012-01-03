@@ -123,9 +123,9 @@ class Makefile(object):
         for name in targets:
             subenv = self.env.deepcopy()
             subenv['pm_target_name'] = name
+            targets[name]['env'] = subenv
             if 'pm_target_match' in targets[name]:
                 subenv['pm_target_match'] = targets[name]['pm_target_match']
-                targets[name]['env'] = subenv
 
                 def interp(cmd):
                     if cmd[:4] == '#PBS':
