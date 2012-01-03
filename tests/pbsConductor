@@ -19,8 +19,8 @@ JVM_COND_PARMS+=" -Server $DB_Server"
 # We don't need this with the job scheduler
 # JVM_COND_PARMS+=" -Wait_to_Start"
 
-# Only process one source per conductor
-JVM_COND_PARMS+=" -Max_Source_Records 1"
+# Only process one source per conductor in batch mode
+JVM_COND_PARMS+=" -Max_Source_Records 1 -Poll_Interval 0"
 
 HiRISE_ROOT?=/HiRISE
 DB_Server?=HiCat
