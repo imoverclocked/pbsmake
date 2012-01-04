@@ -104,14 +104,14 @@ class Makefile(object):
         buildtarget = self.canonicalize(buildtarget) or self.default
         targets = copy.deepcopy(self.targets)
 
-        wildcard = ''
+        wildcard, minmatch = '', 1e99
         for name in targets:
             if '%' in name:
                 regex = name.replace('%', '(\w+)', 1)
                 match = re.search(regex, buildtarget)
-                if match:
+                if match and len(match.group(1)) < minmatch:
                     wildcard = match.group(1)
-                    break
+                    minmatch = len(wildcard)
 
         for name in tuple(targets):
             if '%' in name:
@@ -119,6 +119,7 @@ class Makefile(object):
                 targets[resolved] = targets[name]
                 targets[name]['pm_target_match'] = wildcard
                 del targets[name]
+        assert buildtarget in targets
 
         for name in targets:
             subenv = self.env.deepcopy()
@@ -132,7 +133,11 @@ class Makefile(object):
                         cmd = subenv.interp(cmd)
                     return cmd
 
-                targets[name]['cmds'] = map(interp, targets[name]['cmds'])
+                cmds = map(interp, targets[name]['cmds'])
+                default = '#PBS -S /bin/sh -v pm_target_match,pm_target_name'
+                pos = 1 if cmds[0][:2] == '#!' else 0
+                cmds.insert(pos, default)
+                targets[name]['cmds'] = cmds
 
         pairlist = []
         for target, details in targets.iteritems():
@@ -210,22 +215,22 @@ def parse(iterable, env=Env()):
                 function(*args, **kwds)
             return wrap
 
-    @pattern(r'^([a-zA-Z_\$\%][a-zA-Z_0-9]*)\s*=\s*(.+)$')
+    @pattern(r'^([a-zA-Z_\$\%][a-zA-Z_0-9]*)\s*=\s*(?:[\"\'])?(.+?)(?:[\"\'])?$')
     def vardecl(match, env=env):
         name, value = match.groups()
-        env[name] = str(value)
+        env[name] = env.interp(str(value))
         return name + '=' + value
 
-    @pattern(r'^([a-zA-Z_\$\%][a-zA-Z_0-9]*)\s*\+=\s*(.+)$')
+    @pattern(r'^([a-zA-Z_\$\%][a-zA-Z_0-9]*)\s*\+=\s*(?:[\"\'])?(.+?)(?:[\"\'])?$')
     def varapdecl(match, env=env):
         name, value = match.groups()
-        env[name] += str(value)
+        env[name] += env.interp(str(value))
         return name + '+=' + value
 
-    @pattern(r'^([a-zA-Z_\$\%][a-zA-Z_0-9]*)\s*\?=\s*(.+)$')
+    @pattern(r'^([a-zA-Z_\$\%][a-zA-Z_0-9]*)\s*\?=\s*(?:[\"\'])?(.+?)(?:[\"\'])?$')
     def varcondecl(match, env=env):
         name, value = match.groups()
-        env.setdefault(name, str(value))
+        env.setdefault(name, env.interp(str(value)))
         return name + '?=' + value
 
     @pattern(r'^([a-zA-Z_\$\%][a-zA-Z_0-9\{\}\%\/\.-]*)\s*:(?::([a-zA-Z_\$][a-zA-Z_0-9\{\}]*):)?\s*(.*)$')

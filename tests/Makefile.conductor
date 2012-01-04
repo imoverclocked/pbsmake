@@ -25,15 +25,11 @@ HiRISE_ROOT?=/HiRISE
 DB_Server?=HiCat
 
 # The default CTX rule (CTX_Projector/Converter/Finalizer)
-#CTX_%:
-#	#PBS -q ctx -V
-#	echo "foobar" > /home/pirl/cwvh/output.txt
-
-CTX_Finalizer:
-	#PBS -N CTX_Finalizer
-	echo "pm_target_match = 42" > /home/pirl/cwvh/output.txt
+CTX_%:
+	#PBS -q CTX -V -N ${pm_target_name}
+	java $JVM_COND_PARMS -Pipeline CTX_${pm_target_match} -Configuration $HiRISE_ROOT/Configuration/CTX/CTX.conf -Catalog CTX
 
 # The default conductor rule
-#%:
-#	#PBS -q ${pm_target_match}
-#	java $JVM_COND_PARMS -Pipeline ${pm_target_match} -Configuration $HiRISE_ROOT/Configuration/${pm_target_match}/${pm_target_match}.conf -Catalog HiRISE
+%:
+	#PBS -N ${pm_target_name} -V
+	java $JVM_COND_PARMS -Pipeline ${pm_target_match} -Configuration $HiRISE_ROOT/Configuration/${pm_target_match}/${pm_target_match}.conf -Catalog HiRISE
