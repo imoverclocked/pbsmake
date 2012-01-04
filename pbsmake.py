@@ -215,22 +215,22 @@ def parse(iterable, env=Env()):
                 function(*args, **kwds)
             return wrap
 
-    @pattern(r'^([a-zA-Z_\$\%][a-zA-Z_0-9]*)\s*=\s*(.+)$')
+    @pattern(r'^([a-zA-Z_\$\%][a-zA-Z_0-9]*)\s*=\s*(?:[\"\'])?(.+?)(?:[\"\'])?$')
     def vardecl(match, env=env):
         name, value = match.groups()
-        env[name] = str(value)
+        env[name] = env.interp(str(value))
         return name + '=' + value
 
-    @pattern(r'^([a-zA-Z_\$\%][a-zA-Z_0-9]*)\s*\+=\s*(.+)$')
+    @pattern(r'^([a-zA-Z_\$\%][a-zA-Z_0-9]*)\s*\+=\s*(?:[\"\'])?(.+?)(?:[\"\'])?$')
     def varapdecl(match, env=env):
         name, value = match.groups()
-        env[name] += str(value)
+        env[name] += env.interp(str(value))
         return name + '+=' + value
 
-    @pattern(r'^([a-zA-Z_\$\%][a-zA-Z_0-9]*)\s*\?=\s*(.+)$')
+    @pattern(r'^([a-zA-Z_\$\%][a-zA-Z_0-9]*)\s*\?=\s*(?:[\"\'])?(.+?)(?:[\"\'])?$')
     def varcondecl(match, env=env):
         name, value = match.groups()
-        env.setdefault(name, str(value))
+        env.setdefault(name, env.interp(str(value)))
         return name + '?=' + value
 
     @pattern(r'^([a-zA-Z_\$\%][a-zA-Z_0-9\{\}\%\/\.-]*)\s*:(?::([a-zA-Z_\$][a-zA-Z_0-9\{\}]*):)?\s*(.*)$')
