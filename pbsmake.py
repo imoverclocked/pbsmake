@@ -104,14 +104,14 @@ class Makefile(object):
         buildtarget = self.canonicalize(buildtarget) or self.default
         targets = copy.deepcopy(self.targets)
 
-        wildcard = ''
+        wildcard, minmatch = '', 1e99
         for name in targets:
             if '%' in name:
                 regex = name.replace('%', '(\w+)', 1)
                 match = re.search(regex, buildtarget)
-                if match:
+                if match and len(match.group(1)) < minmatch:
                     wildcard = match.group(1)
-                    break
+                    minmatch = len(wildcard)
 
         for name in tuple(targets):
             if '%' in name:
