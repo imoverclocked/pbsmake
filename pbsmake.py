@@ -119,6 +119,7 @@ class Makefile(object):
                 targets[resolved] = targets[name]
                 targets[name]['pm_target_match'] = wildcard
                 del targets[name]
+        assert buildtarget in targets
 
         for name in targets:
             subenv = self.env.deepcopy()
@@ -132,7 +133,11 @@ class Makefile(object):
                         cmd = subenv.interp(cmd)
                     return cmd
 
-                targets[name]['cmds'] = map(interp, targets[name]['cmds'])
+                cmds = map(interp, targets[name]['cmds'])
+                default = '#PBS -S /bin/sh -v pm_target_match,pm_target_name'
+                pos = 1 if cmds[0][:2] == '#!' else 0
+                cmds.insert(pos, default)
+                targets[name]['cmds'] = cmds
 
         pairlist = []
         for target, details in targets.iteritems():
