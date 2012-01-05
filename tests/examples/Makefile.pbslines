@@ -8,8 +8,10 @@ JVMPARMS+=" -Server ${DB_SERVER}"
 
 CTX_%:
 	#!/usr/bin/python
-	#PBS -q CTX -N ${pm_target_name}
-	#PBS -j oe -k oe
+	@queue CTX
+	@name ${pm_target_name}
+	@join oe
+	@keep oe
 	with open('/home/pirl/cwvh/runlog', 'w') as f:
 		import sys
 		from os import environ as env
@@ -20,9 +22,10 @@ CTX_%:
 		f.write("$pm_target_match = " + env.get('pm_target_match', '') + '\n')
 
 %:
-	#PBS -N ${pm_target_name}
-	#PBS -j oe -k oe
-	#PBS -v JVMPARMS
+	@name ${pm_target_name}
+	@join oe
+	@keep oe
+	@export JVMPARMS
 	#cd /home/pirl/cwvh/
 	#echo "%" > runlog
 	#echo "\$SHELL = ${SHELL}" >> runlog

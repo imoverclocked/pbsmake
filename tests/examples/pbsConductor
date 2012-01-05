@@ -26,16 +26,17 @@ JVM_COND_PARMS+=" -Max_Source_Records 1 -Poll_Interval 0"
 
 # The default CTX rule (CTX_Projector/Converter/Finalizer)
 CTX_%:
-	#PBS -q CTX
-	#PBS -N CTX_${pm_target_match}
-	#PBS -k oe -j oe
-	#PBS -v pm_target_match,JVM_COND_PARMS,HiRISE_ROOT,CP
+	@queue CTX
+	@name CTX_${pm_target_match}
+	@keep oe
+	@join oe
+	@export pm_target_match,JVM_COND_PARMS,HiRISE_ROOT,CP
 	COMMAND="java $JVM_COND_PARMS -Pipeline CTX_${pm_target_match} -Configuration $HiRISE_ROOT/Configuration/CTX/CTX.conf -Catalog CTX"
 	echo $COMMAND
 	$COMMAND
 
 # The default conductor rule
 %:
-	#PBS -q ${pm_target_match}
+	@queue ${pm_target_match}
 	java $JVM_COND_PARMS -Pipeline ${pm_target_match} -Configuration $HiRISE_ROOT/Configuration/${pm_target_match}/${pm_target_match}.conf -Catalog HiRISE
 

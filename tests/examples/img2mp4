@@ -1,5 +1,6 @@
 #!/usr/bin/env pbsmake -f
-# This turns a .IMG into a series of videos using blender/ffmpeg
+# This turns a HiRISE DTM in .IMG format into a series of videos using
+# blender and ffmpeg
 #   .IMG -> .blend -> *.png -> .mp4
 
 BLENDER_PATH?=/HiRISE/Users/$(id -u -n)/DTM_blender
@@ -46,15 +47,15 @@ help::local_target:
 ################################################################################
 ${BLENDER_PATH}/%.blend:
 ## Some defaults which should cover all conversion jobs (hopefully)
-	#PBS -q blender
-	#PBS -m a
-	#PBS -l cput=00:30:00
-	#PBS -l walltime=1:00:00
-	#PBS -l mem=4g
-	#PBS -k o
-	#PBS -j oe
-	#PBS -V
-	#PBS -S /bin/bash
+	@queue blender
+	@mailon a
+	@resource cput=00:30:00
+	@resource walltime=1:00:00
+	@resource mem=4g
+	@keep o
+	@join oe
+	@export-all
+	@qsub-opt /bin/bash
 	set -o nounset
 	set -o errexit
 
@@ -113,16 +114,16 @@ ${BLENDER_PATH}/%.blend:
 ## Render a .blend into a sequence of frames
 ################################################################################
 ${RENDERED_PATH}/%/frames/: ${BLENDER_PATH}/${pm_target_match}.blend
-	#PBS -q blender
-	#PBS -m a
-	#PBS -l cput=48:00:00
-	#PBS -l walltime=4:00:00
-	#PBS -l mem=12g
-	#PBS -l ncpus=8
-	#PBS -k o
-	#PBS -j oe
-	#PBS -V
-	#PBS -S /bin/bash
+	@queue blender
+	@mailon a
+	@resource cput=48:00:00
+	@resource walltime=4:00:00
+	@resource mem=12g
+	@resource ncpus=8
+	@keep o
+	@join oe
+	@export-all
+	@qsub-opt /bin/bash
 	WORKING_DIR=/tmp/$PBS_JOBID
 	BLEND=$WORKING_DIR/${pm_target_match}.blend
 	IMAGES="$WORKING_DIR/"
@@ -138,38 +139,38 @@ ${RENDERED_PATH}/%/frames/: ${BLENDER_PATH}/${pm_target_match}.blend
 ## Compile frames into various movie formats
 ################################################################################
 ${RENDERED_PATH}/%-1080.mp4: ${RENDERED_PATH}/${pm_target_match}/frames/
-	#PBS -q blender
-	#PBS -m a
-	#PBS -l cput=00:05:00
-	#PBS -l walltime=00:10:00
-	#PBS -l mem=1g
-	#PBS -k o
-	#PBS -j oe
-	#PBS -V
+	@queue blender
+	@mailon a
+	@resource cput=00:05:00
+	@resource walltime=00:10:00
+	@resource mem=1g
+	@keep o
+	@join oe
+	@export-all
 	mkdir -p "$OUTPUT_DIR" 2> /dev/null
 	time ffmpeg -loglevel fatal -r $ANIM_FRAMERATE -i "$RENDERED_PATH/${pm_target_match}/frames/$IMAGE_FORMAT" -s hd1080 -b 8000k -y ${pm_target_name}
 
 ${RENDERED_PATH}/%-720.mp4: ${RENDERED_PATH}/frames/${pm_target_match}
-	#PBS -q blender
-	#PBS -m a
-	#PBS -l cput=00:05:00
-	#PBS -l walltime=00:10:00
-	#PBS -l mem=1g
-	#PBS -k o
-	#PBS -j oe
-	#PBS -V
+	@queue blender
+	@mailon a
+	@resource cput=00:05:00
+	@resource walltime=00:10:00
+	@resource mem=1g
+	@keep o
+	@join oe
+	@export-all
 	mkdir -p "$OUTPUT_DIR" 2> /dev/null
 	time ffmpeg -loglevel fatal -r $ANIM_FRAMERATE -i "$RENDERED_PATH/frames/$IMAGE_FORMAT" -s hd720 -b 4000k -y ${pm_target_name}
 
 ${RENDERED_PATH}/%-480.mp4: ${RENDERED_PATH}/frames/${pm_target_match}
-	#PBS -q blender
-	#PBS -m a
-	#PBS -l cput=00:05:00
-	#PBS -l walltime=00:10:00
-	#PBS -l mem=1g
-	#PBS -k o
-	#PBS -j oe
-	#PBS -V
+	@queue blender
+	@mailon a
+	@resource cput=00:05:00
+	@resource walltime=00:10:00
+	@resource mem=1g
+	@keep o
+	@join oe
+	@export-all
 	mkdir -p "$OUTPUT_DIR" 2> /dev/null
 	time ffmpeg -loglevel fatal -r $ANIM_FRAMERATE -i "$RENDERED_PATH/frames/$IMAGE_FORMAT" -s hd480 -b 1000k -y ${pm_target_name}
 
@@ -181,14 +182,14 @@ ${RENDERED_PATH}/%-480.mp4: ${RENDERED_PATH}/frames/${pm_target_match}
 orbits_%::afterany: ${RENDERED_PATH}/${pm_target_match}-480.mp4
 orbits_%::afterany: ${RENDERED_PATH}/${pm_target_match}-720.mp4
 orbits_%::afterany: ${RENDERED_PATH}/${pm_target_match}-1080.mp4
-	#PBS -q blender
-	#PBS -m ae
-	#PBS -k o
-	#PBS -j oe
-	#PBS -l cput=00:05:00
-	#PBS -l walltime=00:10:00
-	#PBS -l mem=128m
-	#PBS -S /bin/bash
+	@queue blender
+	@mailon ae
+	@keep o
+	@join oe
+	@resource cput=00:05:00
+	@resource walltime=00:10:00
+	@resource mem=128m
+	@qsub-opt /bin/bash
 	echo all dependencies rendered ... cleaning up
 	if [[ "$KEEP_FRAMES" == 'false' ]]; then
 	  rm -f $RENDERED_PATH/frames/*.png

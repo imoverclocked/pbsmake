@@ -1,0 +1,10 @@
+:%s/#PBS -N/@name/
+:%s/#PBS -q/@queue/
+:%s/#PBS -m/@mailon/
+:%s/#PBS -M/@mailto/
+:%s/#PBS -k/@keep/
+:%s/#PBS -j/@join/
+:%s/#PBS -l/@resource/
+:%s/#PBS -v/@export/
+:%s/#PBS -V/@export-all/
+
