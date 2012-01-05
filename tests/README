@@ -1,0 +1,10 @@
+examples/
+  -- contains working examples for pbsmake to do something useful
+
+local/
+  -- contains tests that can be run locally to verify the behaviour of pbsmake
+
+run_local -- runs all local tests
+
+runTest -- used by run_local
+
