@@ -1,6 +1,17 @@
-#!/have bin/bash
+#!/bin/bash
 # Run all tests in the local/ directory
 
-cd $(basename $0)
+function die {
+  echo Error: "$@" >&2
+  exit -1
+}
 
-find local/ -name \*.in | xargs ./runTest
+cd $(dirname $0)
+
+PBSMAKE=$(type -p pbsmake)
+
+[[ -x "$PBSMAKE" ]] || die could not find pbsmake in path
+
+echo using $PBSMAKE
+
+find local/ -name \*.in | sed 's/.in$//' | xargs ./runTest
