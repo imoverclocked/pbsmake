@@ -1,0 +1,25 @@
+FOO=foo
+FOOBAR=${FOO}bar
+BAZ=$FOOBAR BAZ
+
+@export FOO
+
+test: default_env nominal_env full_env
+
+default_env:
+	[[ X$FOO = Xfoo ]] || echo need FOO in ${pm_target_name}
+	[[ X$BAR = X ]]    || echo should not have BAR in ${pm_target_name}
+	[[ X$BAZ = X ]]    || echo should not have BAZ in ${pm_target_name}
+
+nominal_env:
+	@export FOOBAR
+	[[ X$FOO = Xfoo ]]    || echo need FOO=foo in ${pm_target_name}: $FOO
+	[[ X$BAR = Xfoobar ]] || echo need BAR=foobar in ${pm_target_name}: $BAR
+	[[ X$BAZ = X ]]       || echo should not have BAZ in ${pm_target_name}
+
+full_env:
+	@export-all
+	[[ X$FOO = Xfoo ]]          || echo need FOO=foo in ${pm_target_name}: $FOO
+	[[ X$BAR = Xfoobar ]]       || echo need BAR=foobar in ${pm_target_name}: $BAR
+	[[ X$BAZ = X"foobar baz" ]] || echo need BAZ=foobar baz in ${pm_target_name}: $BAZ
+

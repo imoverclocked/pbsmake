@@ -1,0 +1,15 @@
+
+static: dynamic1
+	echo static
+
+dynamic%: static${pm_target_match}
+	echo dynamic: ${pm_target_match}
+
+static1: dynamic2
+	echo static1
+
+static2:
+	echo static2
+
+dynamic2:
+	echo dynamic2

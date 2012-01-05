@@ -1,0 +1,30 @@
+match: match-
+	echo 0
+
+match%: match${pm_target_match}-
+	echo 1
+
+match%-: match${pm_target_match}--
+	echo 2
+
+match%--: match${pm_target_match}---
+	echo 3
+
+match%---: match${pm_target_match}----
+	echo 4
+
+match%----: match${pm_target_match}-----
+	echo 5
+
+match%-----: match${pm_target_match}------
+	echo 6
+
+match%------: match${pm_target_match}-------
+	echo 7
+
+match%-------: match${pm_target_match}--------
+	echo 8
+
+match%--------: match${pm_target_match}---------
+	echo 9
+

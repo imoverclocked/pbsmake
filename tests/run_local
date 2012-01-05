@@ -1,0 +1,6 @@
+#!/have bin/bash
+# Run all tests in the local/ directory
+
+cd $(basename $0)
+
+find local/ -name \*.in | xargs ./runTest

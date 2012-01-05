@@ -1,0 +1,33 @@
+# Should output:
+# shorter match: match
+# txt rule
+# target4
+# target3
+# target2
+# target1
+
+TARGET=target1
+
+${TARGET}: target2 target3
+	echo "target1"
+
+target2: target3 target4
+	echo "target2"
+
+target3: target4
+	echo "target3"
+
+target4: target4.txt
+	echo "target4"
+
+shorter-%.txt:
+	echo shorter match: $pm_target_match
+
+%.txt: shorter-match.txt
+	echo "txt rule"
+
+# This is a comment.
+
+FOOBAR="something"
+${FOOBAR}: target4
+	echo ${FOOBAR}
