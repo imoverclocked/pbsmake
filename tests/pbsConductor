@@ -1,4 +1,5 @@
-#!/usr/bin/env pbsmake
+#!/home/pirl/tims/bin/pbsmake -f
+#!/usr/bin/env pbsmake -f
 
 ## Run a conductor inside a job...
 
@@ -27,7 +28,7 @@ DB_Server?=HiCat
 
 # The default CTX rule (CTX_Projector/Converter/Finalizer)
 CTX_%:
-	#PBS -q ctx
+	#PBS -q CTX
 	java $JVM_COND_PARMS -Pipeline CTX_${pm_target_match} -Configuration $HiRISE_ROOT/Configuration/CTX/CTX.conf -Catalog CTX
 
 # The default conductor rule
