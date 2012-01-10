@@ -7,4 +7,5 @@
 :%s/#PBS -l/@resource/
 :%s/#PBS -v/@export/
 :%s/#PBS -V/@export-all/
+:%s/#PBS -S/@qsub-opt/
 

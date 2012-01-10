@@ -2,7 +2,7 @@
 static: dynamic1
 	echo static
 
-dynamic%: static${pm_target_match}
+dynamic%: static%
 	echo dynamic: ${pm_target_match}
 
 static1: dynamic2
