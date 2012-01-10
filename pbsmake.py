@@ -75,7 +75,7 @@ def tsort(pairlist):
 class Makefile(object):
     def __init__(self):
         self.targets = collections.defaultdict(list)
-        self.default = None
+        self.default = ''
 
     @staticmethod
     def canonicalize(name):
@@ -83,7 +83,8 @@ class Makefile(object):
 
     def addtarget(self, name, components=None, cmds=None):
         name = self.canonicalize(name)
-        self.default = self.default or name
+        if not self.default and '%' not in name:
+            self.default = name
         self.current = name
         self.targets[name] = collections.defaultdict(list)
         self.addcomponents(name, components)
@@ -144,9 +145,11 @@ class Makefile(object):
             for component in details['components']:
                 pairlist.append((target, component))
 
-        order = tsort(pairlist) or [buildtarget]
+        order = tsort(pairlist)
         not1 = functools.partial(operator.ne, buildtarget)
         schedule = list(itertools.dropwhile(not1, order))
+        if buildtarget not in schedule:
+            schedule = [buildtarget]
         schedule.reverse()
 
         class Qsub(object):
