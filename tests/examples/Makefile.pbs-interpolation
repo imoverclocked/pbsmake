@@ -1,13 +1,16 @@
 TARGET=target1
 
 ${TARGET}: target2 target3
-	#PBS -V -N ${TARGET}
+	@export-all
+	@name ${TARGET}
 	echo target1
 
 target2: target3
-	#PBS -V -N \${TARGET}
+	@export-all
+	@name \${TARGET}
 	echo target2
 
 target3: 
-	#PBS -V -N target3
+	@export-all
+	@name target3
 	echo target3

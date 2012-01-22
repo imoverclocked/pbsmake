@@ -6,42 +6,42 @@ test-all: test-dynamic.txt
 test-all: ${pm_target_name}.txt
 
 %.txt: a.txt
-	#PBS -N test-static
-	#PBS -j oe
-	#PBS -k o
-	@(echo #PBS -N ${pm_target_match})
+	@name test-static
+	@join oe
+	@keep o
+	@name ${pm_target_match}
 	@(cat bash_helper.sh)
 	[[ ! -z "${pm_target_match}" ]] || die pm_target_match should not be empty
 	[[ "${pm_target_match}.txt" == ${pm_target_name} ]] || die pm_target_match and pm_target_name do not agree
 
 test-static.txt:
-	#PBS -N test-static
-	#PBS -j oe
-	#PBS -k o
+	@name test-static
+	@join oe
+	@keep o
 	@(cat bash_helper.sh)
 	[[ -z "${pm_target_match}" ]] || die pm_target_match should be empty
 	[[ "${pm_target_name}" == "test-static.txt" ]] || die pm_target_name should be test-static.txt
 
 test-early-interpolate.txt:
-	@(echo #PBS -N ${pm_target_name})
-	#PBS -j oe
-	#PBS -k o
-	#PBS -m a
+	@name ${pm_target_name}
+	@join oe
+	@keep o
+	@mailon a
 	@(cat bash_helper.sh)
 	[[ -z "${pm_target_match}" ]] || die pm_target_match should be empty
 	[[ "${pm_target_name}" == "test-early-interpolate.txt" ]] || die pm_target_name should be test-early-interpolate.txt
 
 test-env:
-	#PBS -j oe
-	#PBS -k o
-	#PBS -m a
+	@join oe
+	@keep o
+	@mailon a
 	@(cat bash_helper.sh)
 	[[ "${TEST_VAR123}" == "123" ]] || die TEST_VAR123 should be 123
 
 test-env-override: TEST_VAR123=abc
-	#PBS -j oe
-	#PBS -k o
-	#PBS -m a
+	@join oe
+	@keep o
+	@mailon a
 	@(cat bash_helper.sh)
 	[[ "${TEST_VAR123}" == "abc" ]] || die TEST_VAR123 should be abc
 
