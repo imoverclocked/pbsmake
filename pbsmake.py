@@ -9,6 +9,9 @@ import functools
 import itertools
 import operator
 import subprocess
+import tempfile 
+
+import pbs
 
 
 class Env(object):
@@ -135,7 +138,7 @@ class Makefile(object):
                     return cmd
 
                 cmds = map(interp, targets[name]['cmds'])
-                default = '#PBS -S /bin/sh -v pm_target_match,pm_target_name'
+                default = '#PBS -S /bin/sh'
                 pos = 1 if cmds[0][:2] == '#!' else 0
                 cmds.insert(pos, default)
                 targets[name]['cmds'] = cmds
@@ -152,59 +155,45 @@ class Makefile(object):
             schedule = [buildtarget]
         schedule.reverse()
 
-        class Qsub(object):
-            def __init__(self, targets, debug=False):
-                pipe = subprocess.PIPE
-                self.torqueid = None
-                self.args = dict(stdout=pipe, stdin=pipe, stderr=pipe)
-                self.targets = targets
-                if debug:
-                    self.invoke = self.invokedebug
-                else:
-                    self.invoke = self.invokeqsub
-
-            def __call__(self, name, torqueid=None):
-                return self.invoke(name, torqueid)
-
-            def invokeqsub(self, name, torqueid=None):
-                self.torqueid = torqueid or self.torqueid
-                cmds = '\n'.join(cmd for cmd in self.targets[name]['cmds'])
-                env = self.targets[name]['env'].asdict()
-                self.args.update(env=env)
-                if self.torqueid is None:
-                    p = subprocess.Popen(['qsub', '-'], **self.args)
-                else:
+        def submit(name, lastid=None):
+            target = targets[name]
+            with tempfile.NamedTemporaryFile() as taskfile:
+                taskfile.write('\n'.join(cmd for cmd in target['cmds']))
+                taskfile.flush()
+                subenv = target['env'].asdict()
+                varlist = ','.join('%s=%s' % (k, v) for k, v in subenv.iteritems())
+                if lastid:
+                    attropl = pbs.new_attropl(3)
+                    attropl[0].name = pbs.ATTR_N
+                    attropl[0].value = 'pbsmake-%s' % name
+                    attropl[1].name = pbs.ATTR_v
+                    attropl[1].value = varlist
+                    attropl[2].name = pbs.ATTR_depend
                     dep = name.partition('::')[-1] or 'afterok'
-                    arg = '"depend=%s:%s"' % (dep, self.torqueid)
-                    p = subprocess.Popen(['qsub', '-W', arg, '-'], **self.args)
-                self.torqueid = p.communicate(cmds + '\n')[0].strip()
-                self.targets[name]['torqueid'] = self.torqueid
-                return '%s(%s) scheduled' % (name, self.torqueid)
-
-            def invokedebug(self, name, torqueid=None):
-                self.torqueid = torqueid or self.torqueid
-                cmds = '\n'.join(cmd for cmd in self.targets[name]['cmds'])
-                if self.torqueid is None:
-                    p = 'qsub -\n'
+                    attropl[2].value = 'depend=%s:%s' % (dep, lastid)
                 else:
-                    dep = name.partition('::')[-1] or 'afterok'
-                    arg = '"depend=%s:%s"' % (dep, self.torqueid)
-                    p = 'qsub -W ' + arg + ' -\n'
-                p += cmds + '\n'
-                self.torqueid = name
-                self.targets[name]['torqueid'] = self.torqueid
-                return p
+                    attropl = pbs.new_attropl(2)
+                    attropl[0].name = pbs.ATTR_N
+                    attropl[0].value = 'pbsmake-%s' % name
+                    attropl[1].name = pbs.ATTR_v
+                    attropl[1].value = varlist
+                lastid = pbs.pbs_submit(conn, attropl, taskfile.name, '', '')
+                target['torqueid'] = lastid
+                return '%s(%s) scheduled' % (name, lastid)
 
-        qsub = Qsub(targets, debug=False)
+
+        srvname = pbs.pbs_default()
+        conn = pbs.pbs_connect(srvname)
+
         for name in schedule:
-            print qsub(name)
+            print submit(name)
 
-        for target in targets.iterkeys():
-            if '::' in target and target not in schedule:
+        for name in targets.iterkeys():
+            if '::' in name and name not in schedule:
                 parent = re.sub('::.+', '', target)
                 if parent in schedule:
                     torqueid = targets[parent]['torqueid']
-                    print qsub(target, torqueid)
+                    print submit(name, torqueid)
 
 
 def parse(iterable, env=Env()):
