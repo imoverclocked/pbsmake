@@ -157,29 +157,35 @@ class Makefile(object):
 
         def submit(name, lastid=None):
             target = targets[name]
-            with tempfile.NamedTemporaryFile() as taskfile:
-                taskfile.write('\n'.join(cmd for cmd in target['cmds']))
-                taskfile.flush()
-                subenv = target['env'].asdict()
-                varlist = ','.join('%s=%s' % (k, v) for k, v in subenv.iteritems())
-                if lastid:
-                    attropl = pbs.new_attropl(3)
-                    attropl[0].name = pbs.ATTR_N
-                    attropl[0].value = 'pbsmake-%s' % name
-                    attropl[1].name = pbs.ATTR_v
-                    attropl[1].value = varlist
-                    attropl[2].name = pbs.ATTR_depend
-                    dep = name.partition('::')[-1] or 'afterok'
-                    attropl[2].value = 'depend=%s:%s' % (dep, lastid)
-                else:
-                    attropl = pbs.new_attropl(2)
-                    attropl[0].name = pbs.ATTR_N
-                    attropl[0].value = 'pbsmake-%s' % name
-                    attropl[1].name = pbs.ATTR_v
-                    attropl[1].value = varlist
-                lastid = pbs.pbs_submit(conn, attropl, taskfile.name, '', '')
-                target['torqueid'] = lastid
-                return '%s(%s) scheduled' % (name, lastid)
+            subenv = target['env'].asdict()
+            if self.local:
+                lastid = 'local'
+                for cmd in target['cmds']:
+                    if not cmd.startswith('#'):
+                        subprocess.call(cmd, env=subenv, shell=True)
+            else:
+                with tempfile.NamedTemporaryFile() as taskfile:
+                    taskfile.write('\n'.join(cmd for cmd in target['cmds']))
+                    taskfile.flush()
+                    varlist = ','.join('%s=%s' % (k,v) for k,v in subenv.iteritems())
+                    if lastid:
+                        attropl = pbs.new_attropl(3)
+                        attropl[0].name = pbs.ATTR_N
+                        attropl[0].value = 'pbsmake-%s' % name
+                        attropl[1].name = pbs.ATTR_v
+                        attropl[1].value = varlist
+                        attropl[2].name = pbs.ATTR_depend
+                        dep = name.partition('::')[-1] or 'afterok'
+                        attropl[2].value = 'depend=%s:%s' % (dep, lastid)
+                    else:
+                        attropl = pbs.new_attropl(2)
+                        attropl[0].name = pbs.ATTR_N
+                        attropl[0].value = 'pbsmake-%s' % name
+                        attropl[1].name = pbs.ATTR_v
+                        attropl[1].value = varlist
+                    lastid = pbs.pbs_submit(conn, attropl, taskfile.name, '', '')
+                    target['torqueid'] = lastid
+            return '%s(%s) scheduled' % (name, lastid)
 
 
         srvname = pbs.pbs_default()
@@ -268,11 +274,13 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('target', help='The target to build', nargs='*')
     parser.add_argument('-f', '--makefile', default='Makefile')
+    parser.add_argument('-l', '--local', default=False, action='store_true')
     args = parser.parse_args()
 
     with open(args.makefile) as f:
         contents = (line.rstrip() for line in f.readlines() if line.strip())
         makefile = parse(contents)
+        makefile.local = args.local
         if not args.target and makefile.default:
             args.target = [makefile.default]
         for target in args.target:
