@@ -2,6 +2,8 @@
 
 import os
 import re
+import sys
+import copy
 import collections
 import functools
 import itertools
@@ -19,6 +21,19 @@ class Env(object):
 
     def __setitem__(self, key, value):
         self.env[key] = value
+
+    def asdict(self):
+        d = copy.deepcopy(self.parent)
+        d.update(self.env)
+        return d
+
+    def deepcopy(self):
+        e = copy.deepcopy(self.env)
+        p = copy.deepcopy(self.parent)
+        return Env(e, p)
+
+    def setdefault(self, key, value):
+        return self.env.setdefault(key, value)
 
     def interp(self, string, regex=r'(?<!\\)\${[a-zA-Z_][a-zA-Z_0-9]*}'):
         match = re.search(regex, string)
@@ -60,7 +75,7 @@ def tsort(pairlist):
 class Makefile(object):
     def __init__(self):
         self.targets = collections.defaultdict(list)
-        self.default = None
+        self.default = ''
 
     @staticmethod
     def canonicalize(name):
@@ -68,7 +83,8 @@ class Makefile(object):
 
     def addtarget(self, name, components=None, cmds=None):
         name = self.canonicalize(name)
-        self.default = self.default or name
+        if not self.default and '%' not in name:
+            self.default = name
         self.current = name
         self.targets[name] = collections.defaultdict(list)
         self.addcomponents(name, components)
@@ -87,48 +103,107 @@ class Makefile(object):
 
     def build(self, buildtarget=None):
         buildtarget = self.canonicalize(buildtarget) or self.default
-        assert buildtarget in self.targets
+        targets = copy.deepcopy(self.targets)
+
+        wildcard, minmatch = '', 1e99
+        for name in targets:
+            if '%' in name:
+                regex = name.replace('%', '(\w+)', 1)
+                match = re.search(regex, buildtarget)
+                if match and len(match.group(1)) < minmatch:
+                    wildcard = match.group(1)
+                    minmatch = len(wildcard)
+
+        for name in tuple(targets):
+            if '%' in name:
+                resolved = name.replace('%', wildcard, 1)
+                targets[resolved] = targets[name]
+                targets[name]['pm_target_match'] = wildcard
+                del targets[name]
+        assert buildtarget in targets
+
+        for name in targets:
+            subenv = self.env.deepcopy()
+            subenv['pm_target_name'] = name
+            targets[name]['env'] = subenv
+            if 'pm_target_match' in targets[name]:
+                subenv['pm_target_match'] = targets[name]['pm_target_match']
+
+                def interp(cmd):
+                    if cmd[:4] == '#PBS':
+                        cmd = subenv.interp(cmd)
+                    return cmd
+
+                cmds = map(interp, targets[name]['cmds'])
+                default = '#PBS -S /bin/sh -v pm_target_match,pm_target_name'
+                pos = 1 if cmds[0][:2] == '#!' else 0
+                cmds.insert(pos, default)
+                targets[name]['cmds'] = cmds
 
         pairlist = []
-        for target, details in self.targets.iteritems():
+        for target, details in targets.iteritems():
             for component in details['components']:
                 pairlist.append((target, component))
 
-        order = tsort(pairlist) or [buildtarget]
+        order = tsort(pairlist)
         not1 = functools.partial(operator.ne, buildtarget)
         schedule = list(itertools.dropwhile(not1, order))
+        if buildtarget not in schedule:
+            schedule = [buildtarget]
         schedule.reverse()
 
         class Qsub(object):
-            def __init__(self, targets):
+            def __init__(self, targets, debug=False):
                 pipe = subprocess.PIPE
                 self.torqueid = None
-                self.pipeargs = dict(stdout=pipe, stdin=pipe, stderr=pipe)
+                self.args = dict(stdout=pipe, stdin=pipe, stderr=pipe)
                 self.targets = targets
-                self.proc = subprocess.Popen
+                if debug:
+                    self.invoke = self.invokedebug
+                else:
+                    self.invoke = self.invokeqsub
 
             def __call__(self, name, torqueid=None):
+                return self.invoke(name, torqueid)
+
+            def invokeqsub(self, name, torqueid=None):
                 self.torqueid = torqueid or self.torqueid
                 cmds = '\n'.join(cmd for cmd in self.targets[name]['cmds'])
+                env = self.targets[name]['env'].asdict()
+                self.args.update(env=env)
                 if self.torqueid is None:
-                    p = self.proc(['qsub', '-'], **self.pipeargs)
+                    p = subprocess.Popen(['qsub', '-'], **self.args)
                 else:
                     dep = name.partition('::')[-1] or 'afterok'
                     arg = '"depend=%s:%s"' % (dep, self.torqueid)
-                    p = self.proc(['qsub', '-W', arg, '-'], **self.pipeargs)
+                    p = subprocess.Popen(['qsub', '-W', arg, '-'], **self.args)
                 self.torqueid = p.communicate(cmds + '\n')[0].strip()
                 self.targets[name]['torqueid'] = self.torqueid
                 return '%s(%s) scheduled' % (name, self.torqueid)
 
-        qsub = Qsub(self.targets)
+            def invokedebug(self, name, torqueid=None):
+                self.torqueid = torqueid or self.torqueid
+                cmds = '\n'.join(cmd for cmd in self.targets[name]['cmds'])
+                if self.torqueid is None:
+                    p = 'qsub -\n'
+                else:
+                    dep = name.partition('::')[-1] or 'afterok'
+                    arg = '"depend=%s:%s"' % (dep, self.torqueid)
+                    p = 'qsub -W ' + arg + ' -\n'
+                p += cmds + '\n'
+                self.torqueid = name
+                self.targets[name]['torqueid'] = self.torqueid
+                return p
+
+        qsub = Qsub(targets, debug=False)
         for name in schedule:
             print qsub(name)
 
-        for target in self.targets.iterkeys():
+        for target in targets.iterkeys():
             if '::' in target and target not in schedule:
                 parent = re.sub('::.+', '', target)
                 if parent in schedule:
-                    torqueid = self.targets[parent]['torqueid']
+                    torqueid = targets[parent]['torqueid']
                     print qsub(target, torqueid)
 
 
@@ -143,13 +218,25 @@ def parse(iterable, env=Env()):
                 function(*args, **kwds)
             return wrap
 
-    @pattern(r'^([a-zA-Z_\$\%][a-zA-Z_0-9]*)\s*=\s*(.+)$')
+    @pattern(r'^([a-zA-Z_\$\%][a-zA-Z_0-9]*)\s*=\s*(?:[\"\'])?(.+?)(?:[\"\'])?$')
     def vardecl(match, env=env):
         name, value = match.groups()
-        env[name] = value
+        env[name] = env.interp(str(value))
         return name + '=' + value
 
-    @pattern(r'^([a-zA-Z_\$\%][a-zA-Z_0-9\{\}]*)\s*:(?::([a-zA-Z_\$][a-zA-Z_0-9\{\}]*):)?\s*(.*)$')
+    @pattern(r'^([a-zA-Z_\$\%][a-zA-Z_0-9]*)\s*\+=\s*(?:[\"\'])?(.+?)(?:[\"\'])?$')
+    def varapdecl(match, env=env):
+        name, value = match.groups()
+        env[name] += env.interp(str(value))
+        return name + '+=' + value
+
+    @pattern(r'^([a-zA-Z_\$\%][a-zA-Z_0-9]*)\s*\?=\s*(?:[\"\'])?(.+?)(?:[\"\'])?$')
+    def varcondecl(match, env=env):
+        name, value = match.groups()
+        env.setdefault(name, env.interp(str(value)))
+        return name + '?=' + value
+
+    @pattern(r'^([a-zA-Z_\$\%][a-zA-Z_0-9\{\}\%\/\.-]*)\s*:(?::([a-zA-Z_\$][a-zA-Z_0-9\{\}]*):)?\s*(.*)$')
     def target(match, env=env):
         labels = ('name', 'dep', 'components')
         groups = dict(itertools.izip(labels, match.groups()))
@@ -157,7 +244,7 @@ def parse(iterable, env=Env()):
             groups[k] = env.interp(v) if v else v
         name = groups['name']
         dep = groups['dep'] or 'afterok'
-        components = re.findall('\w+', groups['components'])
+        components = re.findall('\S+', groups['components'])
         makefile.addtarget(name + '::' + dep, components)
         return '%s::%s: %s' % (name, dep, ' '.join(str(c) for c in components))
 
@@ -169,13 +256,8 @@ def parse(iterable, env=Env()):
     @pattern(r'^\t(.+)$')
     def command(match, env=env):
         cmd = match.group(1)
-        if cmd[:4] == '#PBS':
-            cmd = env.interp(cmd)
         makefile.addcmds(makefile.current, cmd)
         return '\t' + cmd
-
-    def notimplemented(*args):
-        return 'not implemented: ' + ', '.join(args)
 
     makefile = Makefile()
     for line in iterable:
@@ -187,7 +269,8 @@ def parse(iterable, env=Env()):
                 #print '%-10s: %s' % (function.__name__, result)
                 break
         if result is None:
-            result = notimplemented(line)
+            raise NotImplementedError(line)
+    makefile.env = env
     return makefile
 
 
@@ -201,7 +284,7 @@ if __name__ == '__main__':
     with open(args.makefile) as f:
         contents = (line.rstrip() for line in f.readlines() if line.strip())
         makefile = parse(contents)
-        if not args.target:
+        if not args.target and makefile.default:
             args.target = [makefile.default]
         for target in args.target:
             makefile.build(target)

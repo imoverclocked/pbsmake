@@ -1,0 +1,34 @@
+CP=.
+CP+=:/opt/java
+
+DB_SERVER?=HiCat
+
+JVMPARMS="-cp ${CP}"
+JVMPARMS+=" -Server ${DB_SERVER}"
+
+CTX_%:
+	#!/usr/bin/python
+	@queue CTX
+	@name ${pm_target_name}
+	@join oe
+	@keep oe
+	with open('/home/pirl/cwvh/runlog', 'w') as f:
+		import sys
+		from os import environ as env
+		f.write("from python -V " + str(sys.version_info[:2]) + '\n')
+		f.write("CTX_%\n")
+		f.write("$SHELL = " + env.get('SHELL', '') + '\n')
+		f.write("$pm_target_name = " + env.get('pm_target_name', '') + '\n')
+		f.write("$pm_target_match = " + env.get('pm_target_match', '') + '\n')
+
+%:
+	@name ${pm_target_name}
+	@join oe
+	@keep oe
+	@export JVMPARMS
+	#cd /home/pirl/cwvh/
+	#echo "%" > runlog
+	#echo "\$SHELL = ${SHELL}" >> runlog
+	#echo "\$pm_target_name = ${pm_target_name}" >> runlog
+	#echo "\$pm_target_match = ${pm_target_match}" >> runlog
+	echo java -classpath $JVMPARMS

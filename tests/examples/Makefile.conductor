@@ -1,0 +1,38 @@
+## Run a conductor inside a job...
+
+CP=.
+CP+=:/opt/java
+CP+=:/opt/java/mysql-connector/mysql-connector.jar
+CP+=:/opt/java/jcm
+CP+=:/opt/java/mysql-connector/mysql-connector.jar
+CP+=:/opt/java/PostgreSQL/postgresql.jar
+CP+=:/opt/java/jcm/jcm_data.jar
+CP+=:/opt/java/SwingX/swingx.jar
+
+DB_Server=HiCat
+
+JVM_COND_PARMS="-cp $CP"
+JVM_COND_PARMS+=" -Djava.awt.headless=true PIRL.Conductor.Conductor"
+JVM_COND_PARMS+=" -Server $DB_Server"
+
+# We don't need this with the job scheduler
+# JVM_COND_PARMS+=" -Wait_to_Start"
+
+# Only process one source per conductor
+JVM_COND_PARMS+=" -Max_Source_Records 1"
+
+HiRISE_ROOT?=/HiRISE
+DB_Server?=HiCat
+
+# The default CTX rule (CTX_Projector/Converter/Finalizer)
+CTX_%:
+	@queue CTX
+	@export-all
+	@name ${pm_target_name}
+	java $JVM_COND_PARMS -Pipeline CTX_${pm_target_match} -Configuration $HiRISE_ROOT/Configuration/CTX/CTX.conf -Catalog CTX
+
+# The default conductor rule
+%:
+	@name ${pm_target_name}
+	@export-all
+	java $JVM_COND_PARMS -Pipeline ${pm_target_match} -Configuration $HiRISE_ROOT/Configuration/${pm_target_match}/${pm_target_match}.conf -Catalog HiRISE
