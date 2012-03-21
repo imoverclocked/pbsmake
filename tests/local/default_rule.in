@@ -1,0 +1,8 @@
+
+default:
+	FILE=/tmp/testing12345678901234567890
+	touch $FILE;rm $FILE
+	echo default rule is run
+
+other:
+	echo this should never be seen unless called explicitly
