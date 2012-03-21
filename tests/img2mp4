@@ -58,6 +58,11 @@ ${BLENDER_PATH}/%.blend:
 	set -o nounset
 	set -o errexit
 
+	function die {
+	  echo error: "$@" >&2
+	  exit -1
+	}
+
 	if [[ -z "$DTM_IMG" ]]; then
 	  DTM_IMG=$(find $DTM_IMG_PATH -name ${pm_target_match}*.IMG | tail -1)
 	  [[ -z "$DTM_IMG" ]] && {
