@@ -8,11 +8,14 @@ function warn {
 
 for test_name in "$@"; do
 
-  pbsmake --local -f "$test_name.makefile" > "$test_name.out"
-  [[ $? == 0 ]] || warn pbsmake exited unhappily.
+  pbsmake -l -f "$test_name.in" > "$test_name.out"
+  if [[ $? != 0 ]]; then
+    warn pbsmake exited unhappily: $test_name
+    continue
+  fi
 
   diff -u "$test_name.expected" "$test_name.out" > "$test_name.diff"
-  if [[ $? == 0 ]]; then
+  if [[ $? != 0 ]]; then
     warn $test_name produced unexpected output
   else
     rm -f "$test_name.diff" "$test_name.out"
