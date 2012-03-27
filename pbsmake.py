@@ -1,17 +1,17 @@
 #!/usr/bin/env python
 
-import os
-import re
-import sys
-import copy
 import collections
+import copy
 import functools
 import itertools
 import operator
-import subprocess
-import tempfile 
-
+import os
 import pbs
+import re
+import shlex
+import subprocess
+import sys
+import tempfile 
 
 
 class Env(object):
@@ -158,15 +158,17 @@ class Makefile(object):
         def submit(name, lastid=None):
             target = targets[name]
             subenv = target['env'].asdict()
-            if self.local:
-                lastid = 'local'
-                for cmd in target['cmds']:
-                    if not cmd.startswith('#'):
-                        subprocess.call(cmd, env=subenv, shell=True)
-            else:
-                with tempfile.NamedTemporaryFile() as taskfile:
-                    taskfile.write('\n'.join(cmd for cmd in target['cmds']))
-                    taskfile.flush()
+            with tempfile.NamedTemporaryFile() as taskfile:
+                taskfile.write('\n'.join(cmd for cmd in target['cmds']))
+                taskfile.flush()
+                if self.local:
+                    lastid = 'local'
+                    cmd = ('/bin/bash', taskfile.name)
+                    out, err = subprocess.Popen(cmd,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            env=subenv).communicate()
+                    return out.rstrip()
+                else:
                     varlist = ','.join('%s=%s' % (k,v) for k,v in subenv.iteritems())
                     if lastid:
                         attropl = pbs.new_attropl(3)
