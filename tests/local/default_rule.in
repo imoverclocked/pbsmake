@@ -1,0 +1,10 @@
+
+default: default_dep
+	echo default rule is run
+
+default_dep:
+	VAR="dependency is run"
+	echo $VAR
+
+other:
+	echo this should never be seen unless called explicitly
