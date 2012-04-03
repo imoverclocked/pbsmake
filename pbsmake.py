@@ -120,9 +120,24 @@ class Makefile(object):
         for name in tuple(targets):
             if '%' in name:
                 resolved = name.replace('%', wildcard, 1)
+                # We need to check if the resolved name is also the name
+                # of an existing static target. The convention is not to
+                # override a static target with the resolved dynamic one.
+                if resolved in targets:
+                    continue
+                # Otherwise, the resolved dynamic target satisfies a dynamic
+                # rule and we need to save the wildcard match.
                 targets[resolved] = targets[name]
                 targets[name]['pm_target_match'] = wildcard
+                # Deleting the original name, which contains the '%' wildcard,
+                # ensures that during the dependency graph creation we have
+                # real target names based off the buildtarget. That is,
+                # a resolved 'generic-%' with buildtarget 'foo' will delete
+                # 'generic-%' in the targets dictionary and replace it with
+                # 'generic-foo' for graph analysis.
                 del targets[name]
+        # Assert that the desired buildtarget is in our completely resolved, as
+        # of the last step, targets dictionary.
         assert buildtarget in targets
 
         for name in targets:
