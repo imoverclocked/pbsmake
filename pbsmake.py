@@ -130,7 +130,7 @@ class Makefile(object):
                     wildcard, matchtarget, minmatch = '', '', 1e99
                     for name in targets:
                         if '%' in name:
-                            regex = name.replace('%', '(\w+)', 1)
+                            regex = name.replace('%', '(\S+)', 1)
                             match = re.search(regex, component)
                             if match and len(match.group(1)) < minmatch:
                                 wildcard = match.group(1)
@@ -255,7 +255,7 @@ def parse(iterable, env=Env()):
         env.setdefault(name, env.interp(str(value)))
         return name + '?=' + value
 
-    @pattern(r'^([a-zA-Z_\$\%][a-zA-Z_0-9\{\}\%\/\.-]*)\s*:(?::([a-zA-Z_\$][a-zA-Z_0-9\{\}]*):)?\s*(.*)$')
+    @pattern(r'^([a-zA-Z_\$\%\-][a-zA-Z_0-9\{\}\%\/\.-]*)\s*:(?::([a-zA-Z_\$][a-zA-Z_0-9\{\}]*):)?\s*(.*)$')
     def target(match, env=env):
         labels = ('name', 'dep', 'components')
         groups = dict(itertools.izip(labels, match.groups()))
