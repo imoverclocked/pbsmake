@@ -2,5 +2,4 @@
 *.pyc
 *.swp
 .DS_Store
-pull_cwvh
-release
+tests/*/*.out

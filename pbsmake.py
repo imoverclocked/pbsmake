@@ -1,14 +1,12 @@
 #!/usr/bin/env python
 
+import argparse
 import collections
 import copy
-import functools
 import itertools
-import operator
 import os
 import pbs
 import re
-import shlex
 import subprocess
 import sys
 import tempfile 
@@ -48,33 +46,6 @@ class Env(object):
         return string
 
 
-# RADLogic's topsort - http://www.radlogic.com/releases/topsort.py
-def tsort(pairlist):
-    num_parents = {}
-    children = {}
-    for parent, child in pairlist:
-        if not num_parents.has_key(parent):
-            num_parents[parent] = 0
-        if not num_parents.has_key(child):
-            num_parents[child] = 0
-        num_parents[child] += 1
-        children.setdefault(parent, []).append(child)
-
-    ordered = [v for v in num_parents.iterkeys() if num_parents[v] == 0]
-    for parent in ordered:
-        del num_parents[parent]
-        if children.has_key(parent):
-            for child in children[parent]:
-                num_parents[child] -= 1
-                if num_parents[child] == 0:
-                    ordered.append(child)
-            del children[parent]
-
-    if num_parents:
-        raise Exception('dependency cycle detected')
-    return ordered
-
-
 class Makefile(object):
     def __init__(self):
         self.targets = collections.defaultdict(list)
@@ -108,37 +79,72 @@ class Makefile(object):
         buildtarget = self.canonicalize(buildtarget) or self.default
         targets = copy.deepcopy(self.targets)
 
-        wildcard, minmatch = '', 1e99
-        for name in targets:
-            if '%' in name:
-                regex = name.replace('%', '(\w+)', 1)
-                match = re.search(regex, buildtarget)
-                if match and len(match.group(1)) < minmatch:
-                    wildcard = match.group(1)
-                    minmatch = len(wildcard)
+        if buildtarget not in targets:
+            # If any top-level target name includes a '%', then we
+            # need to attempt to resolve the wildcard.
+            if any('%' in name for name in targets):
+                # Find longest wildcard match of all wildcard targets.
+                wildcard, minmatch = '', 1e99
+                for name in targets:
+                    if '%' in name:
+                        regex = name.replace('%', '(\S+)', 1)
+                        match = re.search(regex, buildtarget)
+                        if match and len(match.group(1)) < minmatch:
+                            wildcard = match.group(1)
+                            minmatch = len(wildcard)
 
-        for name in tuple(targets):
-            if '%' in name:
-                resolved = name.replace('%', wildcard, 1)
-                # We need to check if the resolved name is also the name
-                # of an existing static target. The convention is not to
-                # override a static target with the resolved dynamic one.
-                if resolved in targets:
-                    continue
-                # Otherwise, the resolved dynamic target satisfies a dynamic
-                # rule and we need to save the wildcard match.
-                targets[resolved] = targets[name]
-                targets[name]['pm_target_match'] = wildcard
-                # Deleting the original name, which contains the '%' wildcard,
-                # ensures that during the dependency graph creation we have
-                # real target names based off the buildtarget. That is,
-                # a resolved 'generic-%' with buildtarget 'foo' will delete
-                # 'generic-%' in the targets dictionary and replace it with
-                # 'generic-foo' for graph analysis.
-                del targets[name]
+                for name in targets:
+                    if '%' in name:
+                        resolved = name.replace('%', wildcard, 1)
+                        # We need to check if the resolved name is also the name
+                        # of an existing static target. The convention is not to
+                        # override a static target with the resolved dynamic one.
+                        if resolved in targets:
+                            continue
+                        # Otherwise, the resolved dynamic target satisfies a dynamic
+                        # rule and we need to save the wildcard match.
+                        targets[resolved] = targets[name]
+                        targets[resolved]['pm_target_match'] = wildcard
+                        # Deleting the original name, which contains the '%' wildcard,
+                        # ensures that during the dependency graph creation we have
+                        # real target names based off the buildtarget. That is,
+                        # a resolved 'generic-%' with buildtarget 'foo' will delete
+                        # 'generic-%' in the targets dictionary and replace it with
+                        # 'generic-foo' for graph analysis.
+                        del targets[name]
+
         # Assert that the desired buildtarget is in our completely resolved, as
         # of the last step, targets dictionary.
         assert buildtarget in targets
+
+        # Traverse all top-level targets and attempt to resolve their wildcard
+        # dependencies. This must be done because the toplogical sort requires
+        # that there be no wildcard targets. An optimization could be made to
+        # embed the topological sort in this step and minimize the amount of
+        # traversals. Currently, the entire makefile must be resolved before
+        # sorting, regardless if the buildtarget has no components.
+        wildcards = set()
+        for target in filter(lambda name: '%' not in name, targets):
+            for component in targets[target]['components']:
+                if component not in targets:
+                    wildcard, matchtarget, minmatch = '', '', 1e99
+                    for name in targets:
+                        if '%' in name:
+                            regex = name.replace('%', '(\S+)', 1)
+                            match = re.search(regex, component)
+                            if match and len(match.group(1)) < minmatch:
+                                wildcard = match.group(1)
+                                minmatch = len(wildcard)
+                                matchtarget = name
+                    resolved = component.replace('%', wildcard, 1)
+                    targets[resolved] = targets[matchtarget]
+                    targets[resolved]['pm_target_match'] = wildcard
+                    wildcards.add(matchtarget)
+
+        # Scan through the top-level targets with wildcards and remove them
+        # since the last block resolved all components into top-level static targets.
+        for name in wildcards:
+            del targets[name]
 
         for name in targets:
             subenv = self.env.deepcopy()
@@ -158,17 +164,18 @@ class Makefile(object):
                 cmds.insert(pos, default)
                 targets[name]['cmds'] = cmds
 
-        pairlist = []
-        for target, details in targets.iteritems():
-            for component in details['components']:
-                pairlist.append((target, component))
+        # Building the dependency list is really simple because our
+        # buildtarget is the sink of a graph we want to perform DFS on.
+        schedule = []
+        def visit(name):
+            target = targets[name]
+            if not target['visited']:
+                target['visited'] = True
+                for component in target['components']:
+                    visit(component)
+                schedule.append(name)
 
-        order = tsort(pairlist)
-        not1 = functools.partial(operator.ne, buildtarget)
-        schedule = list(itertools.dropwhile(not1, order))
-        if buildtarget not in schedule:
-            schedule = [buildtarget]
-        schedule.reverse()
+        visit(buildtarget)
 
         def submit(name, lastid=None):
             target = targets[name]
@@ -248,7 +255,7 @@ def parse(iterable, env=Env()):
         env.setdefault(name, env.interp(str(value)))
         return name + '?=' + value
 
-    @pattern(r'^([a-zA-Z_\$\%][a-zA-Z_0-9\{\}\%\/\.-]*)\s*:(?::([a-zA-Z_\$][a-zA-Z_0-9\{\}]*):)?\s*(.*)$')
+    @pattern(r'^(\S+)\s*:(?::(\S+):)?\s*(.*)$')
     def target(match, env=env):
         labels = ('name', 'dep', 'components')
         groups = dict(itertools.izip(labels, match.groups()))
@@ -287,7 +294,6 @@ def parse(iterable, env=Env()):
 
 
 if __name__ == '__main__':
-    import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('target', help='The target to build', nargs='*')
     parser.add_argument('-f', '--makefile', default='Makefile')
