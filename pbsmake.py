@@ -36,13 +36,15 @@ class Env(object):
     def setdefault(self, key, value):
         return self.env.setdefault(key, value)
 
-    def interp(self, string, regex=r'(?<!\\)\${[a-zA-Z_][a-zA-Z_0-9]*}'):
+    def interp(self, string, regex=r'(?<!\\)\${[a-zA-Z_][a-zA-Z_0-9]*}', defer=True):
         match = re.search(regex, string)
         while match:
             start, end = match.span()
             var = string[start + 2:end - 1]
+            if defer and var == 'pm_target_match':
+                continue
             string = ''.join((string[:start], self[var], string[end:]))
-            match = re.search(regex, string)
+            match = re.search(regex, string[end:])
         return string
 
 
@@ -125,6 +127,15 @@ class Makefile(object):
         # sorting, regardless if the buildtarget has no components.
         wildcards = set()
         for target in filter(lambda name: '%' not in name, targets):
+            # Resolve pm_target_match in components.
+            if 'pm_target_match' in targets[target]:
+                env = Env(dict(pm_target_match=targets[target]['pm_target_match']))
+                components = []
+                for component in targets[target]['components']:
+                    components.append(env.interp(component, defer=False))
+                targets[target]['components'] = components
+
+            # Resolve wildcards in the target position.
             for component in targets[target]['components']:
                 if component not in targets:
                     wildcard, matchtarget, minmatch = '', '', 1e99
@@ -259,6 +270,7 @@ def parse(iterable, env=Env()):
     def target(match, env=env):
         labels = ('name', 'dep', 'components')
         groups = dict(itertools.izip(labels, match.groups()))
+        env.env.update(dict(pm_target_name=groups['name']))
         for k, v in groups.iteritems():
             groups[k] = env.interp(v) if v else v
         name = groups['name']
