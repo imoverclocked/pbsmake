@@ -7,6 +7,7 @@ import itertools
 import os
 import pbs
 import re
+import shlex
 import subprocess
 import sys
 import tempfile 
@@ -248,22 +249,40 @@ def parse(iterable, env=Env()):
                 function(*args, **kwds)
             return wrap
 
+    def execshellcmds(s, regex=r'\$\((.+)\)'):
+        "Exec any $(..) shell commands found in the string s."
+        match = re.search(regex, s)
+        while match:
+            start, end = match.span()
+            cmd = s[start + 2:end - 1]
+            result, error = subprocess.Popen(shlex.split(cmd),
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()
+            if error:
+                error = error.rstrip()
+                print >>sys.stderr, "sub-shell '%s' failed with '%s'" % (cmd, error)
+                sys.exit(1)
+            else:
+                s = ''.join((s[:start], result.rstrip(), s[end:]))
+                match = re.search(regex, s[end:])
+        return s
+
+
     @pattern(r'^([a-zA-Z_\$\%][a-zA-Z_0-9]*)\s*=\s*(?:[\"\'])?(.+?)(?:[\"\'])?$')
     def vardecl(match, env=env):
         name, value = match.groups()
-        env[name] = env.interp(str(value))
+        env[name] = execshellcmds(env.interp(str(value)))
         return name + '=' + value
 
     @pattern(r'^([a-zA-Z_\$\%][a-zA-Z_0-9]*)\s*\+=\s*(?:[\"\'])?(.+?)(?:[\"\'])?$')
     def varapdecl(match, env=env):
         name, value = match.groups()
-        env[name] += env.interp(str(value))
+        env[name] += execshellcmds(env.interp(str(value)))
         return name + '+=' + value
 
     @pattern(r'^([a-zA-Z_\$\%][a-zA-Z_0-9]*)\s*\?=\s*(?:[\"\'])?(.+?)(?:[\"\'])?$')
     def varcondecl(match, env=env):
         name, value = match.groups()
-        env.setdefault(name, env.interp(str(value)))
+        env.setdefault(name, execshellcmds(env.interp(str(value))))
         return name + '?=' + value
 
     @pattern(r'^(\S+)\s*:(?::(\S+):)?\s*(.*)$')
