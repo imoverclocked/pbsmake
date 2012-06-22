@@ -53,19 +53,38 @@ class Makefile(object):
     def __init__(self):
         self.targets = collections.defaultdict(list)
         self.default = ''
+	# Construct self.attrs from available attributes in the pbs module
+	# this provides a mapping from human readable names (no spaces) to
+	# the module ATTR_* names. Not all ATTR_ entities are interesting.
+	self.attrs = {}
+	pbs_module_attrs = [a for a in dir(pbs) if a[0:5] == 'ATTR_']
+	for attr in pbs_module_attrs:
+	    self.attrs[ getattr(pbs, attr) ] = str
 
     @staticmethod
     def canonicalize(name):
         return re.sub('::afterok', '', name)
 
-    def addtarget(self, name, components=None, cmds=None):
+    def addtarget(self, name, components=None, cmds=None, attrs=None):
         name = self.canonicalize(name)
         if not self.default and '%' not in name:
             self.default = name
         self.current = name
         self.targets[name] = collections.defaultdict(list)
         self.addcomponents(name, components)
+        self.addattrs(name, attrs)
         self.addcmds(name, cmds)
+
+    def addattrs(self, name, attrs):
+        if isinstance(attrs, basestring):
+            attrs = dict([attrs.split(" ", 2)])
+	attrs = attrs or {}
+	self.targets[name].setdefault('attrs', {})
+        self.targets[name]['attrs'].update(attrs)
+	# Validate attribute names
+	unknowns = [ dne for dne in attrs.keys() if dne not in self.attrs.keys() ]
+	if len(unknowns):
+	    raise Exception("Unknown pbs attribute(s): " + " ".join(unknowns))
 
     def addcmds(self, name, cmds):
         if isinstance(cmds, basestring):
@@ -203,26 +222,23 @@ class Makefile(object):
                             env=subenv).communicate()
                     return out.rstrip()
                 else:
+		    target['attrs'].setdefault(pbs.ATTR_N, name)
                     varlist = ','.join('%s=%s' % (k,v) for k,v in subenv.iteritems())
+		    target['attrs'].setdefault(pbs.ATTR_v, varlist)
                     if lastid:
-                        attropl = pbs.new_attropl(3)
-                        attropl[0].name = pbs.ATTR_N
-                        attropl[0].value = 'pbsmake-%s' % name
-                        attropl[1].name = pbs.ATTR_v
-                        attropl[1].value = varlist
-                        attropl[2].name = pbs.ATTR_depend
                         dep = name.partition('::')[-1] or 'afterok'
-                        attropl[2].value = 'depend=%s:%s' % (dep, lastid)
-                    else:
-                        attropl = pbs.new_attropl(2)
-                        attropl[0].name = pbs.ATTR_N
-                        attropl[0].value = 'pbsmake-%s' % name
-                        attropl[1].name = pbs.ATTR_v
-                        attropl[1].value = varlist
-                    lastid = pbs.pbs_submit(conn, attropl, taskfile.name, '', '')
+			target['attrs'][pbs.ATTR_depend] = 'depend=%s:%s' % (dep, lastid)
+                    attropl = pbs.new_attropl(len(target['attrs']))
+		    i=0
+		    for n in target['attrs']:
+		    	attropl[i].name = n
+		    	attropl[i].value = target['env'].interp(target['attrs'][n], defer=False)
+			i += 1
+		    print attropl
+		    destination = target['attrs']['queue'] or ''
+                    lastid = pbs.pbs_submit(conn, attropl, taskfile.name, destination, '')
                     target['torqueid'] = lastid
             return '%s(%s) scheduled' % (name, lastid)
-
 
         srvname = pbs.pbs_default()
         conn = pbs.pbs_connect(srvname)
@@ -240,11 +256,13 @@ class Makefile(object):
 
 def parse(iterable, env=Env()):
     handlers = {}
+    handler_order = []
     class pattern(object):
         def __init__(self, regex):
             self.regex = regex
         def __call__(self, function):
             handlers[self.regex] = function
+            handler_order.append(self.regex)
             def wrap(*args, **kwds):
                 function(*args, **kwds)
             return wrap
@@ -265,7 +283,6 @@ def parse(iterable, env=Env()):
                 s = ''.join((s[:start], result.rstrip(), s[end:]))
                 match = re.search(regex, s[end:])
         return s
-
 
     @pattern(r'^([a-zA-Z_\$\%][a-zA-Z_0-9]*)\s*=\s*(?:[\"\'])?(.+?)(?:[\"\'])?$')
     def vardecl(match, env=env):
@@ -303,6 +320,13 @@ def parse(iterable, env=Env()):
         line = match.group(1)
         return '# ' + line
 
+    @pattern(r'^\t@(\w+)\s*(.*)$')
+    def attribute(match, env=env):
+        attr = match.group(1)
+        val = match.group(2)
+        makefile.addattrs(makefile.current, {attr: val})
+        return '\t@' + attr + " " + val
+
     @pattern(r'^\t(.+)$')
     def command(match, env=env):
         cmd = match.group(1)
@@ -312,24 +336,29 @@ def parse(iterable, env=Env()):
     makefile = Makefile()
     for line in iterable:
         result = None
-        for pattern, function in handlers.iteritems():
+        for pattern in handler_order:
             match = re.match(pattern, line)
             if match is not None:
-                result = function(match)
-                #print '%-10s: %s' % (function.__name__, result)
+                result = handlers[pattern](match)
+                # print '%-10s: %s' % (handlers[pattern].__name__, result)
                 break
         if result is None:
             raise NotImplementedError(line)
     makefile.env = env
     return makefile
 
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('target', help='The target to build', nargs='*')
     parser.add_argument('-f', '--makefile', default='Makefile')
     parser.add_argument('-l', '--local', default=False, action='store_true')
+    parser.add_argument('--attrs', default=False, action='store_true')
     args = parser.parse_args()
+
+    if args.attrs:
+        for attr in [n for n in dir(pbs) if n[0:5] == 'ATTR_']:
+            print "%25s: %s" % ( getattr(pbs, attr), attr )
+	sys.exit(0)
 
     with open(args.makefile) as f:
         contents = (line.rstrip() for line in f.readlines() if line.strip())
@@ -339,6 +368,5 @@ if __name__ == '__main__':
             args.target = [makefile.default]
         for target in args.target:
             makefile.build(target)
-
 
 # vim: ts=4 sw=4 et :

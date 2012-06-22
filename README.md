@@ -35,6 +35,19 @@ Also, pbsmake can be used as a script interpreter by using -f as follows.
 
     $ ./makescript target1
 
+Sometimes this may not work (notably OSX) and you will need to use a work-around:
+    (NB: still need to thoroughly test this...)
+
+    --- makescript ---
+    #!/usr/bin/env python /path/to/pbsmake.py -f
+
+    target1: target2
+    	echo running target 1
+
+    target2:
+    	echo running target 2
+    ------------------
+
 ## authors
 
 [Tim Spriggs][tims]

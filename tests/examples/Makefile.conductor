@@ -29,10 +29,10 @@ CTX_%:
 	@queue CTX
 	@export-all
 	@name ${pm_target_name}
-	java $JVM_COND_PARMS -Pipeline CTX_${pm_target_match} -Configuration $HiRISE_ROOT/Configuration/CTX/CTX.conf -Catalog CTX
+	echo java $JVM_COND_PARMS -Pipeline CTX_${pm_target_match} -Configuration $HiRISE_ROOT/Configuration/CTX/CTX.conf -Catalog CTX
 
 # The default conductor rule
 %:
 	@name ${pm_target_name}
 	@export-all
-	java $JVM_COND_PARMS -Pipeline ${pm_target_match} -Configuration $HiRISE_ROOT/Configuration/${pm_target_match}/${pm_target_match}.conf -Catalog HiRISE
+	echo java $JVM_COND_PARMS -Pipeline ${pm_target_match} -Configuration $HiRISE_ROOT/Configuration/${pm_target_match}/${pm_target_match}.conf -Catalog HiRISE
