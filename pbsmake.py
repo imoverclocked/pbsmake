@@ -234,7 +234,6 @@ class Makefile(object):
 		    	attropl[i].name = n
 		    	attropl[i].value = target['env'].interp(target['attrs'][n], defer=False)
 			i += 1
-		    print attropl
 		    destination = target['attrs']['queue'] or ''
                     lastid = pbs.pbs_submit(conn, attropl, taskfile.name, destination, '')
                     target['torqueid'] = lastid
