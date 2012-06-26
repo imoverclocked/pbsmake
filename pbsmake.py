@@ -184,15 +184,6 @@ class Makefile(object):
             if 'pm_target_match' in targets[name]:
                 subenv['pm_target_match'] = targets[name]['pm_target_match']
 
-                # /bin/sh as a default shell will generally do the right thing.
-                # It honors #! syntax at the beginning of the file and it
-                # interprets basic commands without a #! at the beginning of
-                # the file. Obscure users can opt for other shells
-                # (eg: bash,csh,ksh,python,...) via the standard #! syntax
-                #   -- This default ensures users with non-standard shells
-                #      can still use pbsmake files from other users.
-                targets[name]['attrs'].setdefault('Shell_Path_List', '/bin/sh')
-
         # Building the dependency list is really simple because our
         # buildtarget is the sink of a graph we want to perform DFS on.
         schedule = []
@@ -221,24 +212,52 @@ class Makefile(object):
                     return out.rstrip()
                 else:
                     target['attrs'].setdefault(pbs.ATTR_N, name)
+
+                    # Just include all variables by default
                     varlist = ','.join('%s=%s' % (k,v) for k,v in subenv.iteritems())
                     target['attrs'].setdefault(pbs.ATTR_v, varlist)
+
+                    # Track job dependencies
+                    dependencies = []
+                    dep_type = name.partition('::')[-1] or 'afterok'
+                    for dep in target['components']:
+                        dependencies.append("%s:%s" % (dep_type, targets[dep]['torqueid']))
                     if lastid:
-                        dep = name.partition('::')[-1] or 'afterok'
-                	target['attrs'][pbs.ATTR_depend] = 'depend=%s:%s' % (dep, lastid)
-                	print target['attrs'][pbs.ATTR_depend]
+                        dependencies.append("%s:%s" % (dep_type, lastid))
+                    if dependencies:
+                        print "dependencies: ", dependencies
+                        target['attrs'][pbs.ATTR_depend] = ",".join(dependencies)
+
+                    # /bin/sh as a default shell will generally do the right thing.
+                    # It honors #! syntax at the beginning of the file and it
+                    # interprets basic commands without a #! at the beginning of
+                    # the file. Obscure users can opt for other shells
+                    # (eg: bash,csh,ksh,python,...) via the standard #! syntax
+                    #   -- This default ensures users with non-standard shells
+                    #      can still use pbsmake files from other users.
+                    target['attrs'].setdefault(pbs.ATTR_S, '/bin/sh')
+
+                    # Attach attributes to job as the pbs module expects it
                     attropl = pbs.new_attropl(len(target['attrs']))
                     i=0
                     for n in target['attrs']:
-                    	attropl[i].name = n
-                    	attropl[i].value = target['env'].interp(target['attrs'][n], defer=False)
-                	i += 1
+                        attropl[i].name = n
+                        attropl[i].value = target['env'].interp(target['attrs'][n], defer=False)
+                        i += 1
                     try:
-                    	destination = target['attrs']['queue']
+                        destination = target['attrs']['queue']
                     except KeyError:
                         destination = ''
+
+                    # attempt to submit job
                     lastid = pbs.pbs_submit(conn, attropl, taskfile.name, destination, '')
-                    target['torqueid'] = lastid
+                    if lastid:
+                        target['torqueid'] = lastid
+                    else:
+                        print "Error submitting job: %s\n\tAttributes:" % name
+                        for attr,val in target['attrs'].items():
+                            print "\t\t%s: %s" % ( attr, val )
+                        raise Exception(pbs.error())
             return '%s(%s) scheduled' % (name, lastid)
 
         srvname = pbs.pbs_default()
@@ -372,4 +391,4 @@ if __name__ == '__main__':
         for target in args.target:
             makefile.build(target)
 
-# vim: ts=4 sw=4 et :
+# vim: ts=4 sts=4 sw=4 et :
