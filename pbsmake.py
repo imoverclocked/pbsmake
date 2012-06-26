@@ -53,13 +53,13 @@ class Makefile(object):
     def __init__(self):
         self.targets = collections.defaultdict(list)
         self.default = ''
-	# Construct self.attrs from available attributes in the pbs module
-	# this provides a mapping from human readable names (no spaces) to
-	# the module ATTR_* names. Not all ATTR_ entities are interesting.
-	self.attrs = {}
-	pbs_module_attrs = [a for a in dir(pbs) if a[0:5] == 'ATTR_']
-	for attr in pbs_module_attrs:
-	    self.attrs[ getattr(pbs, attr) ] = str
+        # Construct self.attrs from available attributes in the pbs module
+        # this provides a mapping from human readable names (no spaces) to
+        # the module ATTR_* names. Not all ATTR_ entities are interesting.
+        self.attrs = {}
+        pbs_module_attrs = [a for a in dir(pbs) if a[0:5] == 'ATTR_']
+        for attr in pbs_module_attrs:
+            self.attrs[ getattr(pbs, attr) ] = str
 
     @staticmethod
     def canonicalize(name):
@@ -78,13 +78,13 @@ class Makefile(object):
     def addattrs(self, name, attrs):
         if isinstance(attrs, basestring):
             attrs = dict([attrs.split(" ", 2)])
-	attrs = attrs or {}
-	self.targets[name].setdefault('attrs', {})
+        attrs = attrs or {}
+        self.targets[name].setdefault('attrs', {})
         self.targets[name]['attrs'].update(attrs)
-	# Validate attribute names
-	unknowns = [ dne for dne in attrs.keys() if dne not in self.attrs.keys() ]
-	if len(unknowns):
-	    raise Exception("Unknown pbs attribute(s): " + " ".join(unknowns))
+        # Validate attribute names
+        unknowns = [ dne for dne in attrs.keys() if dne not in self.attrs.keys() ]
+        if len(unknowns):
+            raise Exception("Unknown pbs attribute(s): " + " ".join(unknowns))
 
     def addcmds(self, name, cmds):
         if isinstance(cmds, basestring):
@@ -184,16 +184,14 @@ class Makefile(object):
             if 'pm_target_match' in targets[name]:
                 subenv['pm_target_match'] = targets[name]['pm_target_match']
 
-                def interp(cmd):
-                    if cmd[:4] == '#PBS':
-                        cmd = subenv.interp(cmd)
-                    return cmd
-
-                cmds = map(interp, targets[name]['cmds'])
-                default = '#PBS -S /bin/sh'
-                pos = 1 if cmds[0][:2] == '#!' else 0
-                cmds.insert(pos, default)
-                targets[name]['cmds'] = cmds
+                # /bin/sh as a default shell will generally do the right thing.
+                # It honors #! syntax at the beginning of the file and it
+                # interprets basic commands without a #! at the beginning of
+                # the file. Obscure users can opt for other shells
+                # (eg: bash,csh,ksh,python,...) via the standard #! syntax
+                #   -- This default ensures users with non-standard shells
+                #      can still use pbsmake files from other users.
+                targets[name]['attrs'].setdefault('Shell_Path_List', '/bin/sh')
 
         # Building the dependency list is really simple because our
         # buildtarget is the sink of a graph we want to perform DFS on.
@@ -222,19 +220,23 @@ class Makefile(object):
                             env=subenv).communicate()
                     return out.rstrip()
                 else:
-		    target['attrs'].setdefault(pbs.ATTR_N, name)
+                    target['attrs'].setdefault(pbs.ATTR_N, name)
                     varlist = ','.join('%s=%s' % (k,v) for k,v in subenv.iteritems())
-		    target['attrs'].setdefault(pbs.ATTR_v, varlist)
+                    target['attrs'].setdefault(pbs.ATTR_v, varlist)
                     if lastid:
                         dep = name.partition('::')[-1] or 'afterok'
-			target['attrs'][pbs.ATTR_depend] = 'depend=%s:%s' % (dep, lastid)
+                	target['attrs'][pbs.ATTR_depend] = 'depend=%s:%s' % (dep, lastid)
+                	print target['attrs'][pbs.ATTR_depend]
                     attropl = pbs.new_attropl(len(target['attrs']))
-		    i=0
-		    for n in target['attrs']:
-		    	attropl[i].name = n
-		    	attropl[i].value = target['env'].interp(target['attrs'][n], defer=False)
-			i += 1
-		    destination = target['attrs']['queue'] or ''
+                    i=0
+                    for n in target['attrs']:
+                    	attropl[i].name = n
+                    	attropl[i].value = target['env'].interp(target['attrs'][n], defer=False)
+                	i += 1
+                    try:
+                    	destination = target['attrs']['queue']
+                    except KeyError:
+                        destination = ''
                     lastid = pbs.pbs_submit(conn, attropl, taskfile.name, destination, '')
                     target['torqueid'] = lastid
             return '%s(%s) scheduled' % (name, lastid)
@@ -254,14 +256,16 @@ class Makefile(object):
 
 
 def parse(iterable, env=Env()):
-    handlers = {}
-    handler_order = []
+    # OrderedDict so that the patterns are applied in the order they are listed
+    # below. Other orders are not well tested and may blow up.
+    handlers = collections.OrderedDict()
     class pattern(object):
         def __init__(self, regex):
             self.regex = regex
         def __call__(self, function):
+            if self.regex in handlers:
+                del handlers[self.regex]
             handlers[self.regex] = function
-            handler_order.append(self.regex)
             def wrap(*args, **kwds):
                 function(*args, **kwds)
             return wrap
@@ -335,10 +339,10 @@ def parse(iterable, env=Env()):
     makefile = Makefile()
     for line in iterable:
         result = None
-        for pattern in handler_order:
+        for pattern, function in handlers.items():
             match = re.match(pattern, line)
             if match is not None:
-                result = handlers[pattern](match)
+                result = function(match)
                 # print '%-10s: %s' % (handlers[pattern].__name__, result)
                 break
         if result is None:
@@ -357,7 +361,7 @@ if __name__ == '__main__':
     if args.attrs:
         for attr in [n for n in dir(pbs) if n[0:5] == 'ATTR_']:
             print "%25s: %s" % ( getattr(pbs, attr), attr )
-	sys.exit(0)
+        sys.exit(0)
 
     with open(args.makefile) as f:
         contents = (line.rstrip() for line in f.readlines() if line.strip())
