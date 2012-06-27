@@ -97,47 +97,55 @@ class Makefile(object):
         components = map(self.canonicalize, components or [])
         self.targets[name]['components'] += components
 
+    def resolve(self, resolvetarget):
+        ''' take the list of targets and look for something that matches a given
+        name, optionally making a target from a wildcarded target. Also, resolve components. '''
+        targets = self.targets
+        if resolvetarget not in targets:
+            matched_name = None
+            wildcard, minmatch = '', 1e99
+            for name in [tgt for tgt in targets if '%' in tgt]:
+                regex = name.replace("%", '(\S+)', 1) + "$"
+                match = re.match(regex, resolvetarget)
+                if match and len(match.group(1)) < minmatch:
+                    wildcard = match.group(1)
+                    matched_name = name
+                    minmatch = len(wildcard)
+
+            if not matched_name:
+                raise Exception('Could not resolve target: %s' % resolvetarget)
+
+            target = targets[resolvetarget] = copy.deepcopy( targets[matched_name] )
+            target['pm_target_match'] = wildcard
+
+            def replace_perc(tgt_str):
+                return tgt_str.replace('%', wildcard, 1)
+
+            target['components'] = map(replace_perc, target['components'])
+
+        target = targets[resolvetarget]
+        return target
+
     def build(self, buildtarget=None):
         buildtarget = self.canonicalize(buildtarget) or self.default
-        targets = copy.deepcopy(self.targets)
+        targets = self.targets
 
-        if buildtarget not in targets:
-            # If any top-level target name includes a '%', then we
-            # need to attempt to resolve the wildcard.
-            if any('%' in name for name in targets):
-                # Find longest wildcard match of all wildcard targets.
-                wildcard, minmatch = '', 1e99
-                for name in targets:
-                    if '%' in name:
-                        regex = name.replace('%', '(\S+)', 1)
-                        match = re.search(regex, buildtarget)
-                        if match and len(match.group(1)) < minmatch:
-                            wildcard = match.group(1)
-                            minmatch = len(wildcard)
+        # find all targets stemming from buildtarget and make sure they resolve
+        unresolved = [ buildtarget ]
+        resolved = []
+        while unresolved:
+            tgt = unresolved.pop(0)
+            res = self.resolve(tgt)
+            components = res['components']
+            unresolved.extend(res['components'])
+            resolved.append(tgt)
+            # Make sure we don't re-iterate over resolved objects 
+            map(unresolved.remove, [r for r in resolved if r in unresolved])
 
-                for name in targets:
-                    if '%' in name:
-                        resolved = name.replace('%', wildcard, 1)
-                        # We need to check if the resolved name is also the name
-                        # of an existing static target. The convention is not to
-                        # override a static target with the resolved dynamic one.
-                        if resolved in targets:
-                            continue
-                        # Otherwise, the resolved dynamic target satisfies a dynamic
-                        # rule and we need to save the wildcard match.
-                        targets[resolved] = targets[name]
-                        targets[resolved]['pm_target_match'] = wildcard
-                        # Deleting the original name, which contains the '%' wildcard,
-                        # ensures that during the dependency graph creation we have
-                        # real target names based off the buildtarget. That is,
-                        # a resolved 'generic-%' with buildtarget 'foo' will delete
-                        # 'generic-%' in the targets dictionary and replace it with
-                        # 'generic-foo' for graph analysis.
-                        del targets[name]
-
-        # Assert that the desired buildtarget is in our completely resolved, as
-        # of the last step, targets dictionary.
-        assert buildtarget in targets
+        # remove all targets that are not in the resolve list
+        #   (removes all wildcard targets too)
+        for del_target in [tgt for tgt in targets if tgt not in resolved]:
+            del(targets[del_target])
 
         # Traverse all top-level targets and attempt to resolve their wildcard
         # dependencies. This must be done because the toplogical sort requires
@@ -145,41 +153,14 @@ class Makefile(object):
         # embed the topological sort in this step and minimize the amount of
         # traversals. Currently, the entire makefile must be resolved before
         # sorting, regardless if the buildtarget has no components.
-        wildcards = set()
-        for target in filter(lambda name: '%' not in name, targets):
-            # Resolve pm_target_match in components.
-            if 'pm_target_match' in targets[target]:
-                env = Env(dict(pm_target_match=targets[target]['pm_target_match']))
-                components = []
-                for component in targets[target]['components']:
-                    components.append(env.interp(component, defer=False))
-                targets[target]['components'] = components
+        # -- This logic has been kept in-tact with the above two blocks
 
-            # Resolve wildcards in the target position.
-            for component in targets[target]['components']:
-                if component not in targets:
-                    wildcard, matchtarget, minmatch = '', '', 1e99
-                    for name in targets:
-                        if '%' in name:
-                            regex = name.replace('%', '(\S+)', 1)
-                            match = re.search(regex, component)
-                            if match and len(match.group(1)) < minmatch:
-                                wildcard = match.group(1)
-                                minmatch = len(wildcard)
-                                matchtarget = name
-                    resolved = component.replace('%', wildcard, 1)
-                    targets[resolved] = targets[matchtarget]
-                    targets[resolved]['pm_target_match'] = wildcard
-                    wildcards.add(matchtarget)
-
-        # Scan through the top-level targets with wildcards and remove them
-        # since the last block resolved all components into top-level static targets.
-        for name in wildcards:
-            del targets[name]
-
+        # setup useful environment variables
+        cwd = os.getcwd()
         for name in targets:
             subenv = self.env.deepcopy()
             subenv['pm_target_name'] = name
+            subenv.setdefault('PBS_O_WORKDIR', cwd)
             targets[name]['env'] = subenv
             if 'pm_target_match' in targets[name]:
                 subenv['pm_target_match'] = targets[name]['pm_target_match']
@@ -200,7 +181,6 @@ class Makefile(object):
         def submit(name, lastid=None):
             target = targets[name]
             subenv = target['env'].asdict()
-            subenv.setdefault('PBS_O_WORKDIR', os.getcwd())
             with tempfile.NamedTemporaryFile() as taskfile:
                 taskfile.write('\n'.join(cmd for cmd in target['cmds']))
                 taskfile.flush()
@@ -226,7 +206,6 @@ class Makefile(object):
                     if lastid:
                         dependencies.append("%s:%s" % (dep_type, lastid))
                     if dependencies:
-                        print "dependencies: ", dependencies
                         target['attrs'][pbs.ATTR_depend] = ",".join(dependencies)
 
                     # /bin/sh as a default shell will generally do the right thing.
