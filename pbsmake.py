@@ -200,6 +200,7 @@ class Makefile(object):
         def submit(name, lastid=None):
             target = targets[name]
             subenv = target['env'].asdict()
+            subenv.setdefault('PBS_O_WORKDIR', os.getcwd())
             with tempfile.NamedTemporaryFile() as taskfile:
                 taskfile.write('\n'.join(cmd for cmd in target['cmds']))
                 taskfile.flush()
