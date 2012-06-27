@@ -35,7 +35,7 @@ class Env(object):
         return Env(e, p)
 
     def setdefault(self, key, value):
-        return self.env.setdefault(key, value)
+        return self.parent.setdefault(key, value)
 
     def interp(self, string, regex=r'(?<!\\)\${[a-zA-Z_][a-zA-Z_0-9]*}', defer=True):
         match = re.search(regex, string)
@@ -217,12 +217,25 @@ class Makefile(object):
                     #      can still use pbsmake files from other users.
                     target['attrs'].setdefault(pbs.ATTR_S, '/bin/sh')
 
+                    # We need to handle ATTR_l specially. Each resource needs its own
+                    # attropl with the name pbs.ATTR_l:
+                    attr_l = []
+                    if pbs.ATTR_l in target['attrs']:
+                        attr_l = target['attrs'][pbs.ATTR_l].split(",")
+                        del(target['attrs'][pbs.ATTR_l])
+
                     # Attach attributes to job as the pbs module expects it
-                    attropl = pbs.new_attropl(len(target['attrs']))
+                    attropl = pbs.new_attropl(len(target['attrs']) + len(attr_l))
                     i=0
                     for n in target['attrs']:
                         attropl[i].name = n
                         attropl[i].value = target['env'].interp(target['attrs'][n], defer=False)
+                        i += 1
+                    for n in attr_l:
+                        attropl[i].name = pbs.ATTR_l
+                        res, val = n.split("=",1)
+                        attropl[i].resource = res
+                        attropl[i].value = target['env'].interp(val, defer=False)
                         i += 1
                     try:
                         destination = target['attrs']['queue']
