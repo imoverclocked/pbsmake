@@ -246,7 +246,8 @@ class Makefile(object):
         return ret
 
     def submit_pbs(self, name, taskfile, lastid=None):
-        target = self.targets[name]
+        targets = self.targets
+        target = targets[name]
         subenv = target['env'].asdict()
 
         target['attrs'].setdefault(pbs.ATTR_N, name)
@@ -327,9 +328,9 @@ class Makefile(object):
         with tempfile.NamedTemporaryFile() as taskfile:
             taskfile.write('\n'.join(cmd for cmd in target['cmds']))
             taskfile.flush()
-            last_id = self.submit_target(name, taskfile, lastid)
+            lastid = self.submit_target(name, taskfile, lastid)
 
-        if last_id:
+        if lastid:
             return '%s(%s) scheduled' % (name, lastid)
         return ''
 
