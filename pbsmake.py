@@ -148,11 +148,13 @@ class Makefile(object):
         target = targets[resolvetarget]
         return target
 
-    def build(self, buildtargets=[]):
+    def build(self, buildtargets):
         self.start()
         if isinstance(buildtargets, basestring):
             buildtargets = [buildtargets]
-        buildtargets = map(self.canonicalize, buildtargets) or [self.default]
+        if len(buildtargets) == 0:
+            buildtargets = [self.default]
+        buildtargets = map(self.canonicalize, buildtargets)
         targets = self.targets
 
         # find all targets stemming from buildtarget and make sure they resolve
