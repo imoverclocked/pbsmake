@@ -48,6 +48,27 @@ class Env(object):
             match = re.search(regex, string[end:])
         return string
 
+def mapAttrVal(attr, val):
+    ''' Map user attribute input to sane internal values '''
+    maps = {}
+    def attrMap(attrName):
+        def call(f):
+            maps.setdefault(attrName, f)
+	    return self.maps[attrName]
+        return call
+
+    @attrMap('umask')
+    def map_umask(orig_val):
+        ''' umask values starting with 0 are considered to be octal '''
+        # Internally, all umask values seem to be base-10 strings
+        if orig_val[0] == "0":
+            return "%d" % int(orig_val, 8)
+        return orig_val
+
+    try:
+        maps[attr](val)
+    except Exception:
+        raise
 
 class Makefile(object):
     def __init__(self):
@@ -100,7 +121,7 @@ class Makefile(object):
     def addattrs(self, name, attrs):
         if isinstance(attrs, basestring):
             attrs = dict([attrs.split(" ", 2)])
-        attrs = attrs or {}
+        attrs = { k: mapAttrVal(k,v) for (k,v) in attrs or {} }
         self.targets[name].setdefault('attrs', {})
         self.targets[name]['attrs'].update(attrs)
         # Validate attribute names
