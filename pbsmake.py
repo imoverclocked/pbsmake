@@ -12,7 +12,6 @@ import subprocess
 import sys
 import tempfile 
 
-
 class Env(object):
     def __init__(self, env={}, parent=os.environ):
         self.env = env.copy()
@@ -54,7 +53,7 @@ def mapAttrVal(attr, val):
     def attrMap(attrName):
         def call(f):
             maps.setdefault(attrName, f)
-	    return self.maps[attrName]
+            return maps[attrName]
         return call
 
     @attrMap('umask')
@@ -66,9 +65,9 @@ def mapAttrVal(attr, val):
         return orig_val
 
     try:
-        maps[attr](val)
-    except Exception:
-        raise
+        return maps[attr](val)
+    except KeyError:
+        return val
 
 class Makefile(object):
     def __init__(self):
@@ -121,7 +120,7 @@ class Makefile(object):
     def addattrs(self, name, attrs):
         if isinstance(attrs, basestring):
             attrs = dict([attrs.split(" ", 2)])
-        attrs = { k: mapAttrVal(k,v) for (k,v) in attrs or {} }
+        attrs = { k: mapAttrVal(k,attrs[k]) for k in attrs or {} }
         self.targets[name].setdefault('attrs', {})
         self.targets[name]['attrs'].update(attrs)
         # Validate attribute names
